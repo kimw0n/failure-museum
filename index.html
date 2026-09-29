@@ -103,6 +103,12 @@
   .row { display: flex; gap: 8px; } .row > * { flex: 1; margin-top: 0; }
   @media (min-width: 641px) { body.panel-open #toasts { left: 16px; transform: none; width: min(460px, calc(100% - 430px)); } }
   @media (max-width: 640px) {
+    #zone { top: calc(max(12px, env(safe-area-inset-top)) + 50px); font-size: 12px; padding: 5px 9px; }
+    #toasts { top: calc(max(12px, env(safe-area-inset-top)) + 88px); }
+    #topbar button { padding: 0 10px; }
+    #btnLook { bottom: 150px; }
+    #joyHint { bottom: 150px; }
+    #subtitle { bottom: calc(max(16px, env(safe-area-inset-bottom)) + 44px); font-size: 14px; }
     .panel { left: 0; right: 0; bottom: 0; top: auto; width: 100%; max-height: 64%; padding-bottom: max(20px, env(safe-area-inset-bottom)); }
   }
   /* 토스트 / 자막 / 이모지 */
@@ -1256,7 +1262,78 @@ const LocalStore = {
   // 로컬 모드의 방문객 번호는 개그용 기본값 + 이 브라우저 방문 횟수
   async visit() { const n = LS.get('fm_visits', 0) + 1; LS.set('fm_visits', n); return 4811 + n; },
 };
-let Store = LocalStore;
+// 공용 DB 모드: Supabase REST(fetch). 실패하면 storeCall()이 로컬 모드로 폴백한다.
+const RemoteStore = {
+  mode: 'remote',
+  base: (CONFIG.SUPABASE_URL || '').replace(/\/+$/, ''),
+  headers(extra = {}) {
+    const key = CONFIG.SUPABASE_ANON_KEY;
+    const h = { apikey: key, 'Content-Type': 'application/json', ...extra };
+    if (key.startsWith('eyJ')) h.Authorization = `Bearer ${key}`;   // 예전 anon JWT 키. 새 publishable 키는 apikey 헤더만.
+    return h;
+  },
+  async req(path, opts = {}) {
+    const ctrl = new AbortController(), timer = setTimeout(() => ctrl.abort(), 7000);
+    try {
+      const r = await fetch(this.base + path, { ...opts, headers: this.headers(opts.headers), signal: ctrl.signal });
+      if (!r.ok) throw new Error(`Supabase ${r.status}: ${await r.text()}`);
+      const t = await r.text();
+      return t ? JSON.parse(t) : null;
+    } finally { clearTimeout(timer); }
+  },
+  fromRow: r => ({ id: String(r.id), title: r.title, cause: r.cause, age: r.age, relic: r.relic, epitaph: r.epitaph, empathy: r.empathy | 0, createdAt: r.created_at }),
+  async load() {
+    // 최신 300개 + 공감 상위 10개 (오래된 전당 작품이 빠지지 않도록)
+    const [recent, top] = await Promise.all([
+      this.req('/rest/v1/exhibits?select=*&order=created_at.desc&limit=300'),
+      this.req('/rest/v1/exhibits?select=*&order=empathy.desc,created_at.asc&limit=10'),
+    ]);
+    const map = new Map();
+    for (const r of [...top, ...recent]) map.set(String(r.id), this.fromRow(r));
+    return [...map.values()];
+  },
+  async add(ex) {
+    const body = { title: ex.title, cause: ex.cause, age: ex.age, relic: ex.relic, epitaph: ex.epitaph };
+    const rows = await this.req('/rest/v1/exhibits', { method: 'POST', headers: { Prefer: 'return=representation' }, body: JSON.stringify(body) });
+    return this.fromRow(rows[0]);
+  },
+  async empathize(id) {
+    const n = await this.req('/rest/v1/rpc/increment_empathy', { method: 'POST', body: JSON.stringify({ exhibit_id: id }) });
+    return typeof n === 'number' ? n : null;
+  },
+  async visit() {
+    const n = await this.req('/rest/v1/rpc/register_visit', { method: 'POST', body: '{}' });
+    if (typeof n !== 'number') throw new Error('visit counter');
+    return n;
+  },
+};
+let Store = CONFIG.SUPABASE_URL && CONFIG.SUPABASE_ANON_KEY ? RemoteStore : LocalStore;
+async function storeCall(name, ...args) {
+  try { return await Store[name](...args); }
+  catch (e) {
+    if (Store === LocalStore) throw e;
+    console.warn('[실패 박물관] 공용 저장소 오류 → 로컬 모드로 전환', e);
+    Store = LocalStore;
+    if (started) toast('공용 저장소에 연결하지 못해 이 브라우저 전용(로컬) 모드로 전환했습니다.');
+    return LocalStore[name](...args);
+  }
+}
+// 공용 모드에서는 다른 방문객의 등록/공감을 주기적으로 반영 (순위가 오르면 속보)
+async function syncRemote() {
+  if (Store !== RemoteStore || document.hidden || camTween || uiOpen === 'register') return;
+  let list;
+  try { list = await RemoteStore.load(); } catch { return; }
+  const before = topFive(exhibits).map(e => e.id);
+  const byId = new Map(exhibits.map(e => [e.id, e]));
+  let changed = false;
+  for (const r of list) {
+    const e = byId.get(r.id);
+    if (!e) { exhibits.push(r); changed = true; }
+    else if (r.empathy > e.empathy) { e.empathy = r.empathy; changed = true; }
+  }
+  if (changed) { await ensureFonts(exhibitText(list)); applyChanges(before); }
+}
+setInterval(syncRemote, 25000);
 const mine = { empathized: new Set(LS.get('fm_empathized', [])), created: new Set(LS.get('fm_created', [])) };
 function saveMine() { LS.set('fm_empathized', [...mine.empathized]); LS.set('fm_created', [...mine.created]); }
 
@@ -1375,7 +1452,7 @@ async function doEmpathy(ex) {
   sfx.pop();
   director('empathy', ex);
   refreshDetail();
-  try { const n = await Store.empathize(ex.id); if (typeof n === 'number') ex.empathy = Math.max(ex.empathy, n); } catch { }
+  try { const n = await storeCall('empathize', ex.id); if (typeof n === 'number') ex.empathy = Math.max(ex.empathy, n); } catch { }
   applyChanges(before);
 }
 function applyChanges(beforeTop) {
@@ -1441,7 +1518,7 @@ async function submitRegister(e) {
     empathy: 0, createdAt: new Date().toISOString(),
   };
   let saved = ex;
-  try { saved = await Store.add(ex) || ex; } catch { }
+  try { saved = await storeCall('add', ex) || ex; } catch { }
   btn.disabled = false; btn.textContent = '안치하기';
   mine.created.add(saved.id); saveMine();
   LS.set('fm_last_reg', Date.now());
@@ -1920,7 +1997,8 @@ function tick() {
 // ================================================================
 let visitorNo = 0;
 async function boot() {
-  try { exhibits = await Store.load(); } catch { Store = LocalStore; exhibits = await LocalStore.load(); }
+  exhibits = await storeCall('load');
+  if (Store === RemoteStore && !exhibits.length) exhibits = SEEDS.map(e => ({ ...e }));   // 빈 DB여도 박물관이 비어 보이지 않게
   await ensureFonts(document.querySelector('script[type=module]').textContent + exhibitText(exhibits));
   buildLobby();
   buildMorgue();
@@ -1931,6 +2009,7 @@ async function boot() {
   camera.position.set(player.x, player.eye, player.z);
   renderer.setAnimationLoop(tick);
   try { visitorNo = await Store.visit(); } catch { visitorNo = await LocalStore.visit(); }
+  console.info(`[실패 박물관] 저장소 모드: ${Store.mode === 'remote' ? 'Supabase 공용 DB' : '로컬(localStorage)'}`);
   $('#visitorNo').textContent = visitorNo.toLocaleString('ko-KR');
   setVisitorBoard(visitorNo.toLocaleString('ko-KR'));
   $('#loading').classList.add('done');
@@ -1940,6 +2019,7 @@ async function boot() {
 window.FM = {
   player, tp(x, z, yaw = 0, pitch = 0) { player.x = x; player.z = z; setLook(yaw, pitch); },
   get exhibits() { return exhibits; }, get store() { return Store.mode; },
+  get stats() { return { calls: renderer.info.render.calls, tris: renderer.info.render.triangles, pixelRatio }; },
   async card(id) { return (await drawShareCard(exhibits.find(e => e.id === id))).toDataURL(); },
 };
 
