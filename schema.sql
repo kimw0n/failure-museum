@@ -1,12 +1,13 @@
 -- ============================================================
 --  실패 박물관 (Failure Museum) · Supabase 스키마
---  Supabase 대시보드 → SQL Editor 에 전체를 붙여넣고 실행하세요.
---  여러 번 실행해도 안전합니다 (if not exists / on conflict).
+--  Supabase 대시보드 → SQL Editor → New query 에 이 파일 전체를 붙여넣고 [Run].
+--  여러 번 실행해도 안전합니다 (if not exists / on conflict / drop policy if exists).
+--  시드 데이터는 없습니다. 박물관은 빈 상태로 시작합니다.
 -- ============================================================
 
 create extension if not exists pgcrypto;
 
--- ---------- 전시품 ----------
+-- ---------- 1. 전시품 테이블 ----------
 create table if not exists public.exhibits (
   id          text primary key default gen_random_uuid()::text,
   title       text not null check (char_length(title) between 1 and 40),
@@ -17,10 +18,24 @@ create table if not exists public.exhibits (
   empathy     integer not null default 0 check (empathy >= 0),
   created_at  timestamptz not null default now()
 );
+-- 사진 URL (nullable): 우리 Storage 버킷의 공개 URL만 허용
+alter table public.exhibits add column if not exists photo_url text;
+alter table public.exhibits drop constraint if exists exhibits_photo_url_check;
+alter table public.exhibits add constraint exhibits_photo_url_check
+  check (photo_url is null or (char_length(photo_url) <= 500 and photo_url like '%/storage/v1/object/public/exhibit-photos/%'));
+
+-- 예전 버전(시드 15개)을 실행했던 DB라면 시드를 지운다
+delete from public.exhibits where id like 'seed-%';
+
+-- id는 브라우저가 만든 UUID (낙관적 반영과 실시간 이벤트를 id로 합치기 위해)
+alter table public.exhibits drop constraint if exists exhibits_id_format;
+alter table public.exhibits add constraint exhibits_id_format
+  check (id ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$');
+
 create index if not exists exhibits_created_at_idx on public.exhibits (created_at desc);
 create index if not exists exhibits_empathy_idx    on public.exhibits (empathy desc, created_at);
 
--- ---------- RLS: 조회/등록만 허용, 수정·삭제는 불가 ----------
+-- ---------- 2. RLS: 조회/등록만 허용, 수정·삭제 불가 ----------
 alter table public.exhibits enable row level security;
 
 drop policy if exists exhibits_select on public.exhibits;
@@ -31,13 +46,13 @@ drop policy if exists exhibits_insert on public.exhibits;
 create policy exhibits_insert on public.exhibits
   for insert to anon, authenticated with check (empathy = 0);
 
--- update / delete 정책은 만들지 않는다 → 클라이언트가 직접 고칠 수 없음.
--- 컬럼 권한: 클라이언트는 내용 필드만 넣을 수 있고 id·empathy·created_at 은 기본값이 강제된다.
+-- update / delete 정책은 만들지 않는다 → 클라이언트가 직접 고칠 수 없음 (공감은 아래 RPC로만).
+-- 컬럼 권한: 클라이언트는 내용 필드만 넣을 수 있고 empathy · created_at 은 기본값이 강제된다.
 revoke insert, update, delete on public.exhibits from anon, authenticated;
 grant select on public.exhibits to anon, authenticated;
-grant insert (title, cause, age, relic, epitaph) on public.exhibits to anon, authenticated;
+grant insert (id, title, cause, age, relic, epitaph, photo_url) on public.exhibits to anon, authenticated;
 
--- ---------- 공감 +1 은 이 RPC 로만 ----------
+-- ---------- 3. 공감 +1 은 이 RPC 로만 ----------
 create or replace function public.increment_empathy(exhibit_id text)
 returns integer
 language sql
@@ -52,7 +67,7 @@ $$;
 revoke all on function public.increment_empathy(text) from public;
 grant execute on function public.increment_empathy(text) to anon, authenticated;
 
--- ---------- 방문객 카운터 ("당신은 N번째 방문객입니다") ----------
+-- ---------- 4. 방문객 카운터 ("당신은 N번째 방문객입니다") ----------
 create table if not exists public.visit_counter (
   id    int primary key default 1 check (id = 1),
   count bigint not null default 0
@@ -71,21 +86,44 @@ $$;
 revoke all on function public.register_visit() from public;
 grant execute on function public.register_visit() to anon, authenticated;
 
--- ---------- 시드 전시품 15점 (index.html 의 SEEDS 와 같은 id) ----------
-insert into public.exhibits (id, title, cause, age, relic, epitaph, empathy, created_at) values
-  ('seed-01', '3일 만에 끝난 새벽 5시 기상 프로젝트', '그냥 잠', '3일', '결제한 알람 앱 프리미엄 (연간)', '알람은 끝까지 울렸다', 140, '2026-08-02T05:00:00Z'),
-  ('seed-02', '올해의 다이어트', '의욕 증발', '11시간', '치킨 영수증', '내일의 나에게 모든 것을 맡긴다', 127, '2026-08-04T12:00:00Z'),
-  ('seed-03', '헬스장 1년 회원권', '귀찮음', '출석 3회', '샤워만 하고 찍은 출석 도장', '기부 천사로 기억되리', 109, '2026-08-06T19:30:00Z'),
-  ('seed-04', '팀플 자료조사', '팀원 잠수', '2주', '아무도 안 연 공유 폴더', '읽씹은 죽음의 첫 단계', 96, '2026-08-09T23:10:00Z'),
-  ('seed-05', '하루 영어 단어 30개 외우기', '귀찮음', '4일', '첫 장만 새까만 단어장', 'abandon까지는 외웠다', 88, '2026-08-11T08:00:00Z'),
-  ('seed-06', '나만의 투두 앱 만들기', '알고 보니 이미 있던 서비스', '6주', '로고만 완성된 디자인 파일', '세상엔 이미 투두 앱이 4만 개 있었다', 74, '2026-08-14T02:40:00Z'),
-  ('seed-07', '반려식물 SNS 창업', '알고 보니 이미 있던 서비스', '2일', '1년치 결제한 도메인', '검색 한 번이면 됐는데', 67, '2026-08-17T15:00:00Z'),
-  ('seed-08', '배달앱 없이 한 달 살기', '의욕 증발', '1일', '지웠다가 3초 만에 재설치한 앱', '재설치는 생각보다 빨랐다', 61, '2026-08-20T21:00:00Z'),
-  ('seed-09', '기타 독학', 'F코드', '5일', 'C코드만 칠 줄 아는 손가락', 'F코드 앞에서 조용히 눈을 감다', 58, '2026-08-23T17:20:00Z'),
-  ('seed-10', '블로그 1일 1포스팅', '마감', '9일', '"첫 글입니다" 임시저장 17개', '첫 글만 17번 썼다', 52, '2026-08-26T10:00:00Z'),
-  ('seed-11', '졸업작품 기획서', '마감', '한 학기', '최종_진짜최종_이거진짜.pptx', '마감은 언제나 어제였다', 45, '2026-08-29T03:30:00Z'),
-  ('seed-12', '주말 알고리즘 스터디', '팀원 잠수', '2회차', '공지만 남은 단톡방', '"다음 주에 봬요"가 유언이 되었다', 33, '2026-09-02T20:00:00Z'),
-  ('seed-13', '매일 일기 쓰기', '그냥 잠', '3쪽', '1월 1일부터 3일까지만 쓴 다이어리', '오늘은 피곤하니 내일 쓴다', 20, '2026-09-08T23:50:00Z'),
-  ('seed-14', '경제 뉴스 매일 읽기', '의욕 증발', '1주', '구독만 한 채널 12개', '알림 설정만큼은 완벽했다', 12, '2026-09-15T07:00:00Z'),
-  ('seed-15', '미라클 모닝 명상', '그냥 잠', '7분', '"잠들기 좋은 빗소리" 재생 기록', '명상하다 진짜로 명을 달리함', 3, '2026-09-21T06:07:00Z')
-on conflict (id) do nothing;
+-- ---------- 5. Realtime: exhibits 의 INSERT / UPDATE 를 브라우저로 전송 ----------
+do $$
+begin
+  if not exists (
+    select 1 from pg_publication_tables
+     where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'exhibits'
+  ) then
+    alter publication supabase_realtime add table public.exhibits;
+  end if;
+end $$;
+
+-- ---------- 6. Storage: 사진 버킷 "exhibit-photos" ----------
+-- 공개 읽기(public = true). 파일 크기 제한 1MB(앱이 500KB 이하로 압축해 올림), 이미지 형식만 허용.
+insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+values ('exhibit-photos', 'exhibit-photos', true, 1048576, array['image/jpeg', 'image/png', 'image/webp'])
+on conflict (id) do update
+  set public = excluded.public,
+      file_size_limit = excluded.file_size_limit,
+      allowed_mime_types = excluded.allowed_mime_types;
+
+-- 누구나 읽기
+drop policy if exists exhibit_photos_read on storage.objects;
+create policy exhibit_photos_read on storage.objects
+  for select to anon, authenticated
+  using (bucket_id = 'exhibit-photos');
+
+-- 익명 업로드 허용: 이 버킷, "<uuid>.jpg" 이름만. 덮어쓰기(update)·삭제 정책은 없음.
+drop policy if exists exhibit_photos_upload on storage.objects;
+create policy exhibit_photos_upload on storage.objects
+  for insert to anon, authenticated
+  with check (
+    bucket_id = 'exhibit-photos'
+    and name ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.jpg$'
+  );
+
+-- ---------- 확인용 쿼리 (실행 결과가 보이면 설정 완료) ----------
+select
+  (select count(*) from public.exhibits)                                            as exhibits_rows,
+  (select public from storage.buckets where id = 'exhibit-photos')                   as bucket_public,
+  (select count(*) from pg_publication_tables
+     where pubname = 'supabase_realtime' and tablename = 'exhibits')                 as realtime_on;
