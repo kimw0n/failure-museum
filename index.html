@@ -114,6 +114,10 @@
   #subtitle { position: absolute; left: 50%; bottom: calc(max(16px, env(safe-area-inset-bottom)) + 40px); transform: translateX(-50%); width: max-content; max-width: min(640px, calc(100% - 32px)); background: rgba(0, 0, 0, .75); padding: 8px 14px; font-family: var(--serif); font-size: 15px; text-align: center; pointer-events: none; opacity: 0; transition: opacity .3s; word-break: keep-all; }
   #subtitle.on { opacity: 1; }
   #subtitle b { color: var(--gold); margin-right: 6px; }
+  .bubble { position: relative; width: max-content; max-width: 230px; margin-bottom: 40px; background: #fffdf6; color: #16151c; font-family: var(--serif); font-size: 14px; line-height: 1.45; padding: 9px 12px; border: 2px solid #16151c; border-radius: 14px; word-break: keep-all; box-shadow: 0 4px 14px rgba(0,0,0,.45); animation: pop .25s ease-out; }
+  .bubble::after { content: ""; position: absolute; left: 50%; bottom: -10px; margin-left: -8px; border: 8px solid transparent; border-top-color: #16151c; border-bottom: 0; }
+  .bubble[hidden] { display: none; }
+  @keyframes pop { from { transform: scale(.7); opacity: 0; } }
   #btnLook { position: absolute; right: 16px; bottom: 96px; background: var(--gold); color: #1b1a22; border: 0; padding: 14px 20px; font-size: 15px; font-weight: 700; border-radius: 30px; font-family: var(--serif); box-shadow: 0 4px 16px rgba(0,0,0,.5); }
   #btnLook[hidden] { display: none; }
   .emo span { display: inline-block; font-family: var(--sans); font-weight: 700; font-size: 22px; color: #fff; white-space: nowrap; text-shadow: 0 2px 6px #000, 0 0 14px #ff5a7a; animation: emo 1.9s ease-out forwards; }
@@ -154,6 +158,7 @@
   <div id="zone">입구 로비</div>
   <div id="topbar">
     <button id="btnRegister">내 실패 전시하기</button>
+    <button id="btnMute" aria-label="음소거">🔊</button>
     <button id="btnHelp" title="도움말" aria-label="도움말">?</button>
   </div>
   <div id="subtitle"></div>
@@ -756,7 +761,6 @@ function updateZone() {
   $('#zone').textContent = ZONES[z];
   onZoneChange(z, prev);
 }
-function onZoneChange(zone, prev) { }
 
 // 형광등 깜빡임, 촛불, 빛기둥 같은 분위기 애니메이션
 function updateAmbient(dt, now) {
@@ -1298,6 +1302,7 @@ let hitList = [], hovered = null, lastRay = 0, uiOpen = null, selected = null, c
 function collectHits() {
   hitList = [];
   for (const g of [hallGroup, morgueDyn, fameDyn]) if (g) g.traverse(o => { if (o.userData.exhibit) hitList.push(o); });
+  if (npc.hit) hitList.push(npc.hit);
 }
 function pickAt(nx, ny, far) {
   raycaster.setFromCamera(_ndc.set(nx, ny), camera);
@@ -1313,6 +1318,7 @@ function updateHover(now) {
   hovered = ex;
   $('#crosshair').classList.toggle('on', !!ex);
   $('#btnLook').hidden = !(ex && isTouch);
+  $('#btnLook').textContent = ex === NPC_TARGET ? '말 걸기' : '자세히 보기';
   setHint(defaultHint());
 }
 function interact() { if (hovered && !uiOpen) openDetail(hovered); }
@@ -1324,6 +1330,7 @@ function onTap(x, y) {
 }
 
 function openDetail(ex) {
+  if (ex === NPC_TARGET) { say('poke', { force: true }); return; }
   selected = ex; uiOpen = 'detail';
   document.body.classList.add('panel-open');
   unlockPointer();
@@ -1556,14 +1563,316 @@ async function saveShareCard(ex) {
   }, 'image/png');
 }
 
-// 5단계에서 관장/사운드로 교체되는 자리
-function director(kind, ex) { }
-const sfx = { pop() { }, fanfare() { }, trombone() { }, buzz() { } };
+// ================================================================
+//  사운드 (외부 파일 없이 WebAudio로 합성, 첫 클릭 이후에만 재생)
+// ================================================================
+const sfx = (() => {
+  let ctx = null, out = null, muted = LS.get('fm_muted', false);
+  const VOL = .7;
+  const ok = () => ctx && !muted && ctx.state === 'running';
+  function init() {
+    if (ctx) { if (ctx.state === 'suspended') ctx.resume(); return; }
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return;
+    ctx = new AC();
+    out = ctx.createGain(); out.gain.value = muted ? 0 : VOL; out.connect(ctx.destination);
+    // 형광등 웅— 하는 배경음 (아주 작게)
+    const hum = ctx.createOscillator(); hum.type = 'sawtooth'; hum.frequency.value = 120;
+    const lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 220;
+    const hg = ctx.createGain(); hg.gain.value = .02;
+    hum.connect(lp).connect(hg).connect(out); hum.start();
+  }
+  function note({ type = 'sine', f, f2 = f, t = 0, dur = .2, vol = .2, lp = 0, wah = false, vib = 0 }) {
+    const t0 = ctx.currentTime + t, o = ctx.createOscillator(), g = ctx.createGain();
+    o.type = type;
+    o.frequency.setValueAtTime(f, t0);
+    if (f2 !== f) o.frequency.exponentialRampToValueAtTime(f2, t0 + dur);
+    if (vib) {
+      const l = ctx.createOscillator(), lg = ctx.createGain();
+      l.frequency.value = 5.5; lg.gain.setValueAtTime(0, t0); lg.gain.linearRampToValueAtTime(vib, t0 + dur * .5);
+      l.connect(lg).connect(o.frequency); l.start(t0); l.stop(t0 + dur + .05);
+    }
+    let node = o;
+    if (lp) {
+      const fl = ctx.createBiquadFilter(); fl.type = 'lowpass'; fl.Q.value = wah ? 6 : 1;
+      if (wah) { // 트롬본 "와-" 소리: 필터를 열었다 닫는다
+        fl.frequency.setValueAtTime(250, t0);
+        fl.frequency.linearRampToValueAtTime(lp, t0 + Math.min(.12, dur * .3));
+        fl.frequency.linearRampToValueAtTime(lp * .45, t0 + dur);
+      } else fl.frequency.value = lp;
+      node.connect(fl); node = fl;
+    }
+    node.connect(g).connect(out);
+    g.gain.setValueAtTime(.0001, t0);
+    g.gain.exponentialRampToValueAtTime(vol, t0 + .02);
+    g.gain.setValueAtTime(vol, t0 + dur * .75);
+    g.gain.exponentialRampToValueAtTime(.0001, t0 + dur);
+    o.start(t0); o.stop(t0 + dur + .05);
+  }
+  return {
+    init,
+    get muted() { return muted; },
+    toggle() { muted = !muted; LS.set('fm_muted', muted); if (out) out.gain.value = muted ? 0 : VOL; return muted; },
+    // 슬픈 트롬본: 와 와 와 와아아~
+    trombone() {
+      if (!ok()) return;
+      let t = 0;
+      for (const [f, d] of [[311, .42], [294, .42], [277, .42], [262, 1.6]]) {
+        note({ type: 'sawtooth', f, f2: f * .97, t, dur: d, vol: .15, lp: 1300, wah: true, vib: d > 1 ? 7 : 0 });
+        t += d + .05;
+      }
+    },
+    // 공감: 뿅
+    pop() {
+      if (!ok()) return;
+      note({ f: 480, f2: 1500, dur: .12, vol: .25 });
+      note({ type: 'triangle', f: 1300, f2: 2300, t: .09, dur: .11, vol: .12 });
+    },
+    // 전당 팡파레: 빠바밤 빠-암
+    fanfare() {
+      if (!ok()) return;
+      [523, 659, 784].forEach((f, i) => note({ type: 'square', f, t: i * .13, dur: .13, vol: .06, lp: 2600 }));
+      note({ type: 'square', f: 784, t: .42, dur: .16, vol: .06, lp: 2600 });
+      [523, 659, 784, 1047].forEach(f => note({ type: 'square', f, t: .62, dur: 1.1, vol: .045, lp: 2600, vib: 5 }));
+      note({ type: 'triangle', f: 131, t: .62, dur: 1.1, vol: .16 });
+    },
+    // 형광등 깜빡임 지직
+    buzz(pos) {
+      if (!ok() || !pos) return;
+      const k = clamp(1 - Math.hypot(pos.x - player.x, pos.z - player.z) / 12, 0, 1);
+      if (k > 0) note({ type: 'sawtooth', f: 100, f2: 90, dur: .08, vol: .05 * k + .0002, lp: 600 });
+    },
+    // 관장 웅얼웅얼
+    mumble(len) {
+      if (!ok()) return;
+      const n = clamp(Math.round(len / 4), 3, 12);
+      for (let i = 0; i < n; i++) note({ type: 'square', f: rand(130, 210), dur: .06, t: i * .085, vol: .03, lp: 900 });
+    },
+  };
+})();
+addEventListener('pointerdown', sfx.init);
+addEventListener('touchend', sfx.init);
+addEventListener('keydown', sfx.init);
+
+// ================================================================
+//  관장 NPC: 멘트 풀 (상황별 5개 이상)
+// ================================================================
+const LINES = {
+  enter: [
+    '어서 오세요. 오늘도 누군가의 계획이 조용히 숨을 거뒀습니다.',
+    '실패 박물관에 오신 걸 환영합니다. 입장료는 당신의 자존심입니다. 농담이고, 무료입니다.',
+    '조용히 관람해 주세요. 전시품들이 겨우 잠들었거든요.',
+    '처음이세요? 괜찮습니다. 여기 있는 것들도 다 처음엔 의욕이 넘쳤죠.',
+    '왼쪽은 울음방, 오른쪽 계단 위는 명예의 전당입니다. 어디로 가셔도 슬픕니다.',
+    '저는 이곳 관장입니다. 원래 꿈은 이게 아니었어요. 그래서 여기 있습니다.',
+  ],
+  registered: [
+    '삼가 고인의 명복을 빕니다. …저 이 문장 하루에 백 번 말해요.',
+    '삼가 명복을 빕니다. 좋은 곳으로 갔을 거예요. 아마 "다음 주"라는 곳으로요.',
+    '삼가 명복을 빕니다. 향년이 생각보다 짧네요. 괜찮아요, 제 헬스장 회원권은 더 짧았습니다.',
+    '삼가 명복을 빕니다. 이렇게 공개적으로 안치하신 용기, 그것만은 살아 있네요.',
+    '삼가 명복을 빕니다. 유족 대표로 한 말씀… 아, 본인이시죠. 힘내세요.',
+    '삼가 명복을 빕니다. 공감이 쌓이면 전당에 금으로 모셔 드립니다. 금은 페인트입니다.',
+  ],
+  fame: [
+    '불멸의 흑역사관입니다. 여기 계신 분들은 실패로 영생을 얻으셨죠.',
+    '쉿, 1위 님이 넘어져 계십니다. 3년째요. 일으켜 드리면 안 됩니다, 작품입니다.',
+    '금색 동상은 공감 수로만 제작됩니다. 돈으로는 안 됩니다. 저도 해봤어요.',
+    '(헉헉) 계단보다 제가 먼저 왔습니다. 관장은 어디에나 있습니다.',
+    '여기 계신 분들의 공통점이요? 다들 "이번엔 진짜"라고 했습니다.',
+    '바나나 껍질은 사인 추정용 증거물입니다. 치우지 마세요.',
+  ],
+  idle: [
+    '…혹시 전시품이신가요? 너무 가만히 계셔서.',
+    '움직이지 않으시면 "의욕 증발" 코너에 모시겠습니다.',
+    '괜찮아요, 멍때리는 것도 관람입니다. 제 주력 종목이죠.',
+    '관람객님? 숨은 쉬고 계시죠? 여긴 박물관이지 안치실이… 아, 안치실도 있구나.',
+    '그대로 계시면 명패를 달아 드립니다. "향년: 방금".',
+  ],
+  empathy: [
+    '공감 감사합니다. 고인이 조금 덜 외로워졌습니다.',
+    '"나도 이런 적 있음"… 네, 저도요. 방금도요.',
+    '공감 한 표가 고인을 전당으로 모십니다. 금칠 예산은 제 사비입니다.',
+    '함께 울어 주셨군요. 휴지는 안내데스크에 있습니다. 유료입니다. 농담입니다.',
+    '공감 접수되었습니다. 유족분들께 전달하려 했는데 다 본인이시더군요.',
+    '역시 실패는 나눌수록 가벼워집니다. 무게만요. 부끄러움은 그대로입니다.',
+  ],
+  lurk: [
+    '구경만 하시는 거 다 압니다. 당신에게도 하나쯤 있잖아요. 작심삼일짜리.',
+    '우측 상단 "내 실패 전시하기" 버튼, 무료입니다. 부끄러움만 조금 듭니다.',
+    '남의 실패만 보시면 반칙입니다. 하나 기부하고 가세요.',
+    '혹시 올해 다짐, 아직 살아 있나요? …확인해 보세요. 조용히 기다리겠습니다.',
+    '안치실에 빈자리가 있습니다. 누구 자리일까요. 네, 당신 자리요.',
+    '등록하시면 제가 "삼가 명복을 빕니다"를 해 드립니다. 제 특기예요.',
+  ],
+  hall: [
+    '메인홀입니다. 최신 실패부터 전시합니다. 안쪽으로 갈수록 오래 묵은 실패죠.',
+    '진열장은 만지지 마세요. 이미 충분히 망가졌습니다.',
+    '형광등이 깜빡이는 건 연출입니다. 교체 예산 확보에 실패했거든요.',
+    '(헉헉) 먼저 와 있었습니다. 관장은 어디에나 있습니다.',
+    '가까이 가서 자세히 보시면 공감 버튼이 있습니다. 누르면 고인이 좋아합니다.',
+  ],
+  morgue: [
+    '신규 안치실입니다. 방금 돌아가신 계획들이 모셔져 있어요.',
+    '여기서는 우셔도 됩니다. 저도 가끔 여기서 웁니다. 월급날에요.',
+    '관 뚜껑은 열지 마세요. 안에 "내일부터"가 들어 있습니다.',
+    '(헉헉) 먼저 와 있었습니다. 뛰지 마세요, 엄숙한 곳입니다.',
+    '빈 관이 있다면… 네, 예약석입니다.',
+  ],
+  poke: [
+    '저 전시품 아닙니다. 아직은요.',
+    '관장 찌르기는 관람 예절에 어긋납니다.',
+    '네, 부르셨어요? 조의금은 받지 않습니다.',
+    '제 실패요? 이 박물관이요. 사람이 너무 많아서… 농담입니다, 한가합니다.',
+    '넥타이가 검은 건 매일이 장례식이라서입니다.',
+  ],
+};
+LINES.lobby = LINES.enter;
+
+// ================================================================
+//  관장 NPC: 모델 (둥근 머리, 정장, 검은 넥타이)
+// ================================================================
+const NPC_TARGET = { npc: true, id: '__npc', title: '관장' };
+const STATIONS = { lobby: [0, 6.55], hall: [-7.3, -1.3], morgue: [-11.2, 10.7], fame: [19.6, 3.4] };
+const npc = { g: null, head: null, torso: null, el: null, zone: 'lobby', speakUntil: 0, lastNear: 0, lastIdle: 0, nextLurk: Infinity, recent: [], yaw: 0 };
+const puffs = [];
+function buildDirector() {
+  const g = new THREE.Group();
+  const suit = mat(0x1b1b27), tieM = mat(0x050507), shoe = mat(0x0a0a0a);
+  for (const x of [-.11, .11]) {
+    mesh(geo('cap', .085, .5, 3, 8), suit, x, .4, 0, g);
+    box(.14, .07, .26, shoe, x, .035, .05, g);
+  }
+  const torso = new THREE.Group(); torso.position.y = .88; g.add(torso);
+  mesh(geo('cap', .23, .36, 4, 10), suit, 0, .26, 0, torso).scale.set(1, 1, .72);
+  box(.15, .3, .02, M.white, 0, .4, .158, torso);
+  box(.055, .26, .02, tieM, 0, .34, .172, torso);
+  box(.075, .05, .03, tieM, 0, .5, .172, torso);
+  for (const s of [-1, 1]) {
+    box(.07, .16, .02, suit, s * .085, .44, .165, torso).rotation.z = s * .35;   // 옷깃
+    const arm = mesh(geo('cap', .066, .4, 3, 8), suit, s * .29, .22, 0, torso); arm.rotation.z = s * .1;
+    mesh(geo('sphere', .065, 8, 6), SKIN, s * .315, -.03, .02, torso);
+  }
+  const badge = textPanel(.13, .055, (c, W, H) => {
+    c.fillStyle = '#e8b84a'; c.fillRect(0, 0, W, H);
+    c.fillStyle = '#1b1a22'; c.font = `700 ${H * .7}px ${FONT_SANS}`; c.textAlign = 'center'; c.textBaseline = 'middle'; c.fillText('관장', W / 2, H / 2 + 1);
+  }, 600);
+  badge.position.set(-.13, .47, .168); torso.add(badge);
+  const head = new THREE.Group(); head.position.y = 1.58; g.add(head);
+  mesh(geo('sphere', .21, 12, 10), SKIN, 0, 0, 0, head);
+  mesh(geo('sphere', .215, 12, 8, 0, Math.PI * 2, 0, Math.PI * .42), HAIR, 0, .015, -.01, head).rotation.z = .12;
+  for (const s of [-1, 1]) {
+    mesh(geo('sphere', .026, 6, 4), M.black, s * .075, .02, .19, head);
+    box(.075, .016, .012, HAIR, s * .075, .085, .195, head).rotation.z = -s * .32;   // 처진 눈썹
+    mesh(geo('sphere', .045, 6, 4), SKIN, s * .205, 0, 0, head);
+  }
+  box(.13, .03, .025, HAIR, 0, -.065, .2, head);   // 콧수염
+  box(.05, .01, .01, mat(0x6b2a2a), 0, -.115, .19, head);
+  mesh(geo('sphere', .035, 6, 4), mat(0xe8b090), 0, -.01, .21, head);  // 코
+  // 말풍선 (CSS2D → 한글이 깨지지 않음)
+  const wrap = document.createElement('div');
+  wrap.innerHTML = '<div class="bubble" hidden></div>';
+  const bubble = new CSS2DObject(wrap);
+  bubble.position.set(0, 2.25, 0); g.add(bubble);
+  const hit = box(.9, 2, .9, M.hit, 0, 1, 0, g); hit.userData.exhibit = NPC_TARGET;
+  scene.add(g);
+  Object.assign(npc, { g, head, torso, el: wrap.firstChild, hit });
+  placeDirector('lobby', false);
+}
+function placeDirector(zone, withPuff = true) {
+  const st = STATIONS[zone];
+  if (!st || !npc.g) return;
+  if (withPuff && npc.zone !== zone) puff(npc.g.position);
+  npc.zone = zone;
+  npc.g.position.set(st[0], floorAt(st[0], st[1]), st[1]);
+  if (withPuff) puff(npc.g.position);
+  dynamicColliders = dynamicColliders.filter(c => c.tag !== 'npc');
+  colliderTag = 'npc'; addCollider(dynamicColliders, st[0], st[1], .6, .6); colliderTag = null;
+}
+function puff(p) {
+  for (let i = 0; i < 8; i++) {
+    const s = mesh(geo('sphere', .18, 6, 4), M.white, p.x, p.y + rand(.2, 1.6), p.z, scene);
+    puffs.push({ s, v: new THREE.Vector3(rand(-1, 1), rand(.2, 1), rand(-1, 1)), life: 0 });
+  }
+}
+
+// ================================================================
+//  관장 NPC: 대사 / 반응
+// ================================================================
+function say(kind, { force = false } = {}) {
+  const now = performance.now();
+  if (!npc.g || (!force && now < npc.speakUntil)) return;
+  const pool = LINES[kind];
+  if (!pool) return;
+  const fresh = pool.filter(l => !npc.recent.includes(l));
+  const text = pick(fresh.length ? fresh : pool);
+  npc.recent.push(text); if (npc.recent.length > 10) npc.recent.shift();
+  npc.el.textContent = text;
+  $('#subtitle').innerHTML = `<b>관장</b>${esc(text)}`;
+  npc.speakUntil = now + clamp(text.length * 85, 3800, 8000);
+  sfx.mumble(text.length);
+}
+function director(kind, ex) {
+  if (kind === 'enter') { npc.nextLurk = performance.now() + 75000; say('enter', { force: true }); }
+  else if (kind === 'registered') { placeDirector('morgue'); say('registered', { force: true }); }
+  else if (kind === 'empathy') say('empathy', { force: true });
+}
+function onZoneChange(zone) {
+  if (!STATIONS[zone]) return;
+  placeDirector(zone);
+  if (zone === 'fame') { sfx.fanfare(); confettiBurst(); }
+  setTimeout(() => { if (currentZone === zone) say(zone, { force: zone === 'fame' }); }, 450);
+}
+const _hp = new THREE.Vector3();
+function updateDirector(dt, now) {
+  if (!npc.g) return;
+  const dx = player.x - npc.g.position.x, dz = player.z - npc.g.position.z, dist = Math.hypot(dx, dz);
+  // 플레이어 쪽으로 몸을 돌림
+  const target = Math.atan2(dx, dz);
+  let d = target - npc.yaw; d = Math.atan2(Math.sin(d), Math.cos(d));
+  npc.yaw += d * Math.min(1, dt * 3);
+  npc.g.rotation.y = npc.yaw;
+  const speaking = now < npc.speakUntil;
+  npc.torso.position.y = .88 + Math.sin(now * .002) * .008;
+  npc.head.rotation.z = speaking ? Math.sin(now * .012) * .07 : Math.sin(now * .001) * .03;
+  npc.head.rotation.x = speaking ? Math.sin(now * .02) * .04 : .08;   // 평소엔 고개 숙여 애도
+  // 말풍선은 가까우면 3D로, 멀거나 화면 밖이면 하단 자막으로
+  _hp.set(npc.g.position.x, npc.g.position.y + 2.2, npc.g.position.z).project(camera);
+  const onScreen = _hp.z < 1 && Math.abs(_hp.x) < .95 && Math.abs(_hp.y) < .95;
+  const near = dist < 10 && onScreen;
+  npc.el.hidden = !(speaking && near);
+  $('#subtitle').classList.toggle('on', speaking && !near);
+  if (!started || uiOpen || camTween) return;
+  // 가까이 가면 한마디
+  if (dist < 3.2 && !speaking && now - npc.lastNear > 18000) { npc.lastNear = now; say(currentZone in LINES ? currentZone : 'enter'); }
+  // 오래 가만히 있을 때
+  if (now - player.lastMove > 25000 && now - npc.lastIdle > 25000) { npc.lastIdle = now; say('idle', { force: true }); }
+  // 등록 안 하고 구경만 오래 할 때
+  if (!registeredEver && now > npc.nextLurk) { npc.nextLurk = now + 60000; say('lurk'); }
+}
+function updatePuffs(dt) {
+  for (let i = puffs.length - 1; i >= 0; i--) {
+    const p = puffs[i];
+    p.life += dt;
+    p.s.position.addScaledVector(p.v, dt * 1.2);
+    p.s.scale.setScalar(Math.max(.01, 1 - p.life / .7) * 1.4);
+    if (p.life > .7) { p.s.removeFromParent(); puffs.splice(i, 1); }
+  }
+}
+function tapNpc(x, y) {
+  raycaster.setFromCamera(_ndc.set(x / innerWidth * 2 - 1, -(y / innerHeight) * 2 + 1), camera);
+  raycaster.far = 9;
+  if (npc.hit && raycaster.intersectObject(npc.hit, false).length) { say('poke', { force: true }); return true; }
+  return false;
+}
+function setMuteIcon() { $('#btnMute').textContent = sfx.muted ? '🔇' : '🔊'; $('#btnMute').setAttribute('aria-label', sfx.muted ? '소리 켜기' : '음소거'); }
+
 
 // ================================================================
 //  HUD
 // ================================================================
 function defaultHint() {
+  if (hovered === NPC_TARGET) return isTouch ? '관장을 탭하면 말을 겁니다' : '[E] 또는 클릭 — 관장에게 말 걸기';
   if (hovered) return isTouch ? `「${hovered.title}」 — 탭하거나 [자세히 보기]` : `[E] 또는 클릭 — 「${hovered.title}」 자세히 보기`;
   if (isTouch) return '왼쪽 드래그: 걷기 · 오른쪽 드래그: 둘러보기 · 전시품 탭: 자세히';
   if (lockFailed) return '드래그해서 둘러보기 · WASD 이동 · 전시품 클릭';
@@ -1593,6 +1902,8 @@ function tick() {
     updateHover(now);
   }
   updateAmbient(dt, now);
+  updateDirector(dt, now);
+  updatePuffs(dt);
   // 프레임이 부족하면 해상도를 조금씩 낮춘다 (모바일 30fps 목표)
   fpsAcc += dt; fpsFrames++;
   if (fpsAcc > 2) {
@@ -1614,6 +1925,7 @@ async function boot() {
   buildLobby();
   buildMorgue();
   buildStairsAndFame();
+  buildDirector();
   layoutAll();
   setLook(0, -0.05);
   camera.position.set(player.x, player.eye, player.z);
@@ -1638,6 +1950,7 @@ $('#btnEnter').addEventListener('click', () => {
   started = true;
   setHint(defaultHint());
   lockPointer();
+  sfx.init();
   if (firstEntry) { firstEntry = false; onFirstEnter(); }
 });
 function onFirstEnter() {
@@ -1647,6 +1960,8 @@ function onFirstEnter() {
 $('#btnHelp').addEventListener('click', () => { unlockPointer(); closeUI(); $('#intro').hidden = false; });
 $('#btnRegister').addEventListener('click', openRegister);
 $('#btnLook').addEventListener('click', interact);
+$('#btnMute').addEventListener('click', () => { sfx.init(); sfx.toggle(); setMuteIcon(); });
+setMuteIcon();
 $('#btnEmpathy').addEventListener('click', () => doEmpathy(selected));
 $('#btnShare').addEventListener('click', () => selected && saveShareCard(selected));
 for (const b of document.querySelectorAll('[data-close]')) b.addEventListener('click', closeUI);
