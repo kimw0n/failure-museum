@@ -1,0 +1,500 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<script>
+  // ===== 설정: Supabase 값을 채우면 공용 DB 모드, 비워두면 로컬 모드 =====
+  const CONFIG = { SUPABASE_URL: "", SUPABASE_ANON_KEY: "" };
+</script>
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="theme-color" content="#0d0b1e">
+<title>실패 박물관</title>
+<meta name="description" content="망한 계획과 다짐이 영면하는 3D 박물관. 당신의 실패도 전시해 드립니다.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Gowun+Batang:wght@400;700&family=Noto+Sans+KR:wght@400;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --ink: #0d0b1e;
+    --panel: rgba(14, 12, 28, .94);
+    --line: rgba(255, 255, 255, .22);
+    --text: #ecebf5;
+    --dim: #a9a6c2;
+    --gold: #e8c25a;
+    --red: #b3242f;
+    --serif: "Gowun Batang", "AppleMyungjo", "Nanum Myeongjo", serif;
+    --sans: "Noto Sans KR", "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: var(--ink); color: var(--text); font-family: var(--sans); }
+  body { touch-action: none; user-select: none; -webkit-user-select: none; }
+  canvas#view { position: fixed; inset: 0; display: block; }
+  .labels { position: fixed; inset: 0; pointer-events: none; }
+  button { font-family: inherit; cursor: pointer; }
+
+  /* 로딩 */
+  #loading { position: fixed; inset: 0; z-index: 50; display: grid; place-content: center; justify-items: center; gap: 18px; background: var(--ink); transition: opacity .6s; }
+  #loading p { font-family: var(--serif); font-size: 18px; letter-spacing: .08em; color: var(--dim); margin: 0; }
+  #loading.done { opacity: 0; pointer-events: none; }
+  .candle { width: 14px; height: 46px; background: #f4efe0; border-radius: 3px; position: relative; }
+  .candle::before { content: ""; position: absolute; left: 50%; top: -22px; width: 12px; height: 20px; margin-left: -6px; background: radial-gradient(circle at 50% 70%, #fff6c8, #ffb23e 55%, transparent 70%); border-radius: 50% 50% 45% 45%; animation: flame 1.1s infinite alternate ease-in-out; }
+  @keyframes flame { from { transform: scaleY(1) rotate(-3deg); } to { transform: scaleY(1.2) rotate(4deg); } }
+
+  /* 입장 안내 (부고 카드) */
+  #intro { position: fixed; inset: 0; z-index: 40; display: grid; place-items: center; padding: 16px; background: rgba(6, 5, 14, .72); backdrop-filter: blur(3px); }
+  #intro[hidden] { display: none; }
+  .card { width: min(460px, 100%); max-height: calc(100% - 16px); overflow: auto; background: #f3f0e6; color: #1b1a22; border: 1px solid #000; outline: 6px double #1b1a22; outline-offset: -14px; padding: 34px 30px 28px; text-align: center; font-family: var(--serif); }
+  .card .kicker { font-size: 13px; letter-spacing: .5em; color: #555; }
+  .card h1 { font-size: 30px; margin: 6px 0 4px; letter-spacing: .06em; }
+  .card .sub { margin: 0 0 18px; font-size: 14px; color: #444; }
+  .card .ribbon { display: inline-block; width: 44px; height: 3px; background: #111; margin: 4px 0 16px; }
+  .keys { display: grid; grid-template-columns: auto 1fr; gap: 6px 14px; text-align: left; font-family: var(--sans); font-size: 14px; margin: 0 auto 20px; max-width: 320px; }
+  .keys b { font-weight: 700; white-space: nowrap; }
+  .card .visitor { font-size: 15px; margin: 0 0 16px; }
+  .card .visitor strong { font-size: 20px; }
+  .btn-solemn { background: #1b1a22; color: #f3f0e6; border: 0; padding: 13px 26px; font-size: 16px; font-family: var(--serif); letter-spacing: .08em; }
+  .btn-solemn:hover { background: #000; }
+  .only-touch, .only-desk { display: contents; }
+  body:not(.touch) .only-touch, body.touch .only-desk { display: none; }
+
+  /* HUD */
+  #hud { position: fixed; inset: 0; pointer-events: none; z-index: 10; }
+  #hud > * { pointer-events: auto; }
+  #crosshair { position: absolute; left: 50%; top: 50%; width: 8px; height: 8px; margin: -4px 0 0 -4px; border-radius: 50%; border: 1.5px solid rgba(255,255,255,.75); pointer-events: none; transition: transform .15s, border-color .15s; }
+  #crosshair.on { transform: scale(1.8); border-color: var(--gold); }
+  #topbar { position: absolute; top: max(12px, env(safe-area-inset-top)); right: 12px; display: flex; gap: 8px; }
+  #topbar button { background: rgba(10, 9, 22, .78); color: var(--text); border: 1px solid var(--line); height: 40px; min-width: 40px; padding: 0 12px; font-size: 14px; border-radius: 3px; }
+  #topbar #btnRegister { border-color: var(--gold); color: var(--gold); font-family: var(--serif); font-weight: 700; }
+  #hint { position: absolute; left: 50%; bottom: max(16px, env(safe-area-inset-bottom)); transform: translateX(-50%); width: max-content; max-width: calc(100% - 32px); font-size: 13px; color: var(--dim); text-align: center; background: rgba(10, 9, 22, .6); padding: 6px 12px; border-radius: 3px; pointer-events: none; }
+  #zone { position: absolute; left: 12px; top: max(12px, env(safe-area-inset-top)); font-family: var(--serif); font-size: 14px; color: var(--dim); background: rgba(10, 9, 22, .6); padding: 8px 12px; border-left: 3px solid var(--gold); pointer-events: none; }
+  #toasts { position: absolute; top: 64px; left: 50%; transform: translateX(-50%); display: grid; gap: 8px; width: min(520px, calc(100% - 32px)); pointer-events: none; }
+
+  /* 모바일 조이스틱 */
+  #joystick { position: absolute; width: 110px; height: 110px; margin: -55px 0 0 -55px; border-radius: 50%; border: 2px solid rgba(255,255,255,.25); background: rgba(255,255,255,.06); display: none; pointer-events: none; }
+  #joystick .knob { position: absolute; left: 50%; top: 50%; width: 46px; height: 46px; margin: -23px 0 0 -23px; border-radius: 50%; background: rgba(255,255,255,.35); }
+  #joyHint { position: absolute; left: 24px; bottom: 70px; font-size: 12px; color: rgba(255,255,255,.4); pointer-events: none; display: none; }
+  body.touch #joyHint { display: block; }
+</style>
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"
+} }
+</script>
+</head>
+<body>
+<div id="loading"><div class="candle"></div><p>고인의 뜻을 기리는 중...</p></div>
+
+<div id="intro" hidden>
+  <div class="card">
+    <div class="kicker">訃 告</div>
+    <h1>실패 박물관</h1>
+    <p class="sub">이곳의 모든 전시품은 한때 의욕이 있었습니다.</p>
+    <div class="ribbon"></div>
+    <p class="visitor">당신은 <strong id="visitorNo">—</strong>번째 방문객입니다.</p>
+    <div class="keys">
+      <span class="only-desk"><b>W A S D</b><span>걷기 (Shift: 서둘러 조문)</span></span>
+      <span class="only-desk"><b>마우스</b><span>둘러보기 (클릭하면 시점 고정, Esc 해제)</span></span>
+      <span class="only-desk"><b>클릭 / E</b><span>전시품 자세히 보기</span></span>
+      <span class="only-touch"><b>왼쪽 드래그</b><span>걷기</span></span>
+      <span class="only-touch"><b>오른쪽 드래그</b><span>둘러보기</span></span>
+      <span class="only-touch"><b>전시품 탭</b><span>자세히 보기</span></span>
+      <b>우측 상단</b><span>내 실패 전시하기 · 음소거 · 도움말</span>
+    </div>
+    <button class="btn-solemn" id="btnEnter">조의를 표하고 입장하기</button>
+  </div>
+</div>
+
+<div id="hud" hidden>
+  <div id="crosshair"></div>
+  <div id="zone">입구 로비</div>
+  <div id="topbar">
+    <button id="btnHelp" title="도움말">?</button>
+  </div>
+  <div id="toasts"></div>
+  <div id="hint">클릭해서 둘러보기 · WASD 이동</div>
+  <div id="joyHint">← 여기를 드래그해서 걷기</div>
+  <div id="joystick"><div class="knob"></div></div>
+</div>
+
+<script type="module">
+import * as THREE from 'three';
+import { PointerLockControls } from 'three/addons/controls/PointerLockControls.js';
+import { CSS2DRenderer, CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
+
+// ================================================================
+//  공통 유틸
+// ================================================================
+const $ = s => document.querySelector(s);
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+const rand = (a, b) => a + Math.random() * (b - a);
+const pick = arr => arr[Math.floor(Math.random() * arr.length)];
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+const isTouch = matchMedia('(hover: none) and (pointer: coarse)').matches;
+if (isTouch) document.body.classList.add('touch');
+
+const FONT_SERIF = '"Gowun Batang", "AppleMyungjo", "Nanum Myeongjo", serif';
+const FONT_SANS = '"Noto Sans KR", "Apple SD Gothic Neo", "Malgun Gothic", sans-serif';
+
+// 한글 웹폰트는 unicode-range 조각으로 받기 때문에, 캔버스에 그릴 글자를 미리 로드해 둔다.
+async function ensureFonts(text) {
+  const t = text + '0123456789가나다';
+  const jobs = ['400 32px "Gowun Batang"', '700 32px "Gowun Batang"', '400 32px "Noto Sans KR"', '700 32px "Noto Sans KR"']
+    .map(f => document.fonts.load(f, t).catch(() => {}));
+  await Promise.race([Promise.all(jobs), sleep(3500)]);
+}
+
+// ================================================================
+//  렌더러 / 씬 / 카메라
+// ================================================================
+const renderer = new THREE.WebGLRenderer({ antialias: !isTouch, powerPreference: 'high-performance' });
+let pixelRatio = Math.min(devicePixelRatio, isTouch ? 1.5 : 2);
+renderer.setPixelRatio(pixelRatio);
+renderer.setSize(innerWidth, innerHeight);
+renderer.domElement.id = 'view';
+document.body.prepend(renderer.domElement);
+
+const labelRenderer = new CSS2DRenderer();
+labelRenderer.setSize(innerWidth, innerHeight);
+labelRenderer.domElement.className = 'labels';
+document.body.insertBefore(labelRenderer.domElement, $('#hud'));
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x0d0b1e);
+scene.fog = new THREE.Fog(0x0d0b1e, 16, 46);
+
+const camera = new THREE.PerspectiveCamera(70, innerWidth / innerHeight, 0.05, 90);
+camera.rotation.order = 'YXZ';
+
+addEventListener('resize', () => {
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+  labelRenderer.setSize(innerWidth, innerHeight);
+});
+
+// ================================================================
+//  재질 / 도형 헬퍼 (로우폴리, 그림자 없음)
+// ================================================================
+const matCache = new Map();
+function mat(color, opts = {}) {
+  const key = color + JSON.stringify(opts);
+  if (!matCache.has(key)) matCache.set(key, new THREE.MeshLambertMaterial({ color, flatShading: true, ...opts }));
+  return matCache.get(key);
+}
+const geoCache = new Map();
+function geo(kind, ...args) {
+  const key = kind + args.join(',');
+  if (!geoCache.has(key)) {
+    const G = { box: THREE.BoxGeometry, sphere: THREE.SphereGeometry, cyl: THREE.CylinderGeometry, cap: THREE.CapsuleGeometry, plane: THREE.PlaneGeometry, cone: THREE.ConeGeometry }[kind];
+    geoCache.set(key, new G(...args));
+  }
+  return geoCache.get(key);
+}
+function mesh(g, m, x = 0, y = 0, z = 0, parent) {
+  const o = new THREE.Mesh(g, m);
+  o.position.set(x, y, z);
+  o.matrixAutoUpdate = true;
+  if (parent) parent.add(o);
+  return o;
+}
+const box = (w, h, d, m, x, y, z, p) => mesh(geo('box', w, h, d), m, x, y, z, p);
+
+// 캔버스 텍스처 (명패, 표지판)
+function canvasTexture(w, h, draw) {
+  const c = document.createElement('canvas');
+  c.width = w; c.height = h;
+  const g = c.getContext('2d');
+  draw(g, w, h);
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  t.anisotropy = 4;
+  return t;
+}
+function wrapLines(g, text, maxW, maxLines = 3) {
+  const out = [];
+  let line = '';
+  for (const ch of [...text]) {
+    if (g.measureText(line + ch).width > maxW && line) { out.push(line); line = ch.trim() ? ch : ''; }
+    else line += ch;
+  }
+  if (line) out.push(line);
+  if (out.length > maxLines) { out.length = maxLines; out[maxLines - 1] = out[maxLines - 1].slice(0, -1) + '…'; }
+  return out;
+}
+// 폭 w(미터) 짜리 글자판. draw(g, W, H)는 캔버스 좌표로 그린다.
+function textPanel(w, h, draw, ppm = 220) {
+  const tex = canvasTexture(Math.round(w * ppm), Math.round(h * ppm), draw);
+  return new THREE.Mesh(geo('plane', w, h), new THREE.MeshBasicMaterial({ map: tex, transparent: true, fog: true }));
+}
+
+// ================================================================
+//  충돌 / 바닥 높이
+// ================================================================
+const staticColliders = [];   // {minX,maxX,minZ,maxZ}
+let dynamicColliders = [];
+function addCollider(list, cx, cz, w, d) {
+  list.push({ minX: cx - w / 2, maxX: cx + w / 2, minZ: cz - d / 2, maxZ: cz + d / 2 });
+}
+function blocked(x, z, r) {
+  for (const list of [staticColliders, dynamicColliders])
+    for (const c of list)
+      if (x > c.minX - r && x < c.maxX + r && z > c.minZ - r && z < c.maxZ + r) return true;
+  return false;
+}
+function floorAt(x, z) { return 0; }
+
+// 벽: 축 정렬 선분 + 문 구멍
+const WALL_T = 0.3;
+function wallLine(parent, axis, fixed, from, to, height, m, doors = [], y0 = 0, doorH = 3) {
+  const cuts = [from, ...doors.flat(), to];
+  for (let i = 0; i < cuts.length; i += 2) {
+    const a = cuts[i], b = cuts[i + 1];
+    if (b - a > 0.01) segment(a, b, y0, height);
+  }
+  for (const [a, b] of doors) segment(a, b, y0 + doorH, height - doorH, false);
+  function segment(a, b, yb, h, collide = true) {
+    const len = b - a, mid = (a + b) / 2;
+    const w = axis === 'x' ? len : WALL_T, d = axis === 'x' ? WALL_T : len;
+    const x = axis === 'x' ? mid : fixed, z = axis === 'x' ? fixed : mid;
+    box(w, h, d, m, x, yb + h / 2, z, parent);
+    if (collide) addCollider(staticColliders, x, z, w, d);
+  }
+}
+function room(parent, { x0, x1, z0, z1, y = 0, h = 5, wall, floor, ceil, doors = {} }) {
+  const fl = mesh(geo('plane', x1 - x0, z1 - z0), floor, (x0 + x1) / 2, y, (z0 + z1) / 2, parent);
+  fl.rotation.x = -Math.PI / 2;
+  const ce = mesh(geo('plane', x1 - x0, z1 - z0), ceil, (x0 + x1) / 2, y + h, (z0 + z1) / 2, parent);
+  ce.rotation.x = Math.PI / 2;
+  if (doors.n !== false) wallLine(parent, 'x', z0, x0, x1, h, wall, doors.n || [], y);
+  if (doors.s !== false) wallLine(parent, 'x', z1, x0, x1, h, wall, doors.s || [], y);
+  if (doors.w !== false) wallLine(parent, 'z', x0, z0, z1, h, wall, doors.w || [], y);
+  if (doors.e !== false) wallLine(parent, 'z', x1, z0, z1, h, wall, doors.e || [], y);
+}
+
+// ================================================================
+//  공간: 입구 로비 (1단계는 로비만)
+// ================================================================
+const world = new THREE.Group();
+scene.add(world);
+
+const floorTex = canvasTexture(256, 256, (g, w, h) => {
+  g.fillStyle = '#1e1a33'; g.fillRect(0, 0, w, h);
+  g.fillStyle = '#29244a'; g.fillRect(0, 0, w / 2, h / 2); g.fillRect(w / 2, h / 2, w / 2, h / 2);
+  g.strokeStyle = 'rgba(0,0,0,.35)'; g.lineWidth = 3; g.strokeRect(0, 0, w, h);
+});
+floorTex.wrapS = floorTex.wrapT = THREE.RepeatWrapping;
+function floorMat(color, repeatX, repeatZ) {
+  const t = floorTex.clone(); t.needsUpdate = true; t.repeat.set(repeatX, repeatZ);
+  return new THREE.MeshLambertMaterial({ color, map: t });
+}
+const M = {
+  wall: mat(0x2b2452), wallDeep: mat(0x221c44), ceil: mat(0x15122a),
+  trim: mat(0x0e0c1c), white: mat(0xeeeeee), black: mat(0x111111),
+  wood: mat(0x5b3a26), gold: mat(0xe0b24a, { emissive: 0x3a2800 }),
+  tube: new THREE.MeshBasicMaterial({ color: 0xf2f6ff }),
+};
+
+function buildLobby() {
+  const g = new THREE.Group(); world.add(g);
+  room(g, { x0: -9, x1: 9, z0: 0, z1: 14, h: 5, wall: M.wall, floor: floorMat(0xffffff, 9, 7), ceil: M.ceil });
+  // 걸레받이
+  for (const [x, z, w, d] of [[0, 0.16, 18, .04], [0, 13.84, 18, .04], [-8.84, 7, .04, 14], [8.84, 7, .04, 14]]) box(w, .2, d, M.trim, x, .1, z, g);
+  // 정면 현판
+  const title = textPanel(7.2, 1.4, (c, W, H) => {
+    c.fillStyle = '#0e0c1c'; c.fillRect(0, 0, W, H);
+    c.strokeStyle = '#e0b24a'; c.lineWidth = 8; c.strokeRect(14, 14, W - 28, H - 28);
+    c.fillStyle = '#f3efe2'; c.textAlign = 'center'; c.textBaseline = 'middle';
+    c.font = `700 ${H * .42}px ${FONT_SERIF}`; c.fillText('실 패 박 물 관', W / 2, H * .42);
+    c.fillStyle = '#e0b24a'; c.font = `400 ${H * .15}px ${FONT_SERIF}`; c.fillText('F A I L U R E   M U S E U M', W / 2, H * .77);
+  });
+  title.position.set(0, 3.9, 0.17); g.add(title);
+  const motto = textPanel(6, .5, (c, W, H) => {
+    c.fillStyle = '#c9c4e6'; c.textAlign = 'center'; c.textBaseline = 'middle';
+    c.font = `400 ${H * .5}px ${FONT_SERIF}`; c.fillText('이곳의 모든 전시품은 한때 의욕이 있었습니다.', W / 2, H / 2);
+  });
+  motto.position.set(0, 2.9, 0.17); g.add(motto);
+  // 형광등
+  for (const z of [3.5, 10.5]) box(3, .08, .18, M.tube, 0, 4.94, z, g);
+  const light = new THREE.PointLight(0xe8ecff, 18, 20, 1); light.position.set(0, 4.4, 7); g.add(light);
+}
+
+// 조명
+scene.add(new THREE.HemisphereLight(0xb8b4ff, 0x2a2140, 2.2));
+
+// ================================================================
+//  플레이어 이동 (데스크톱: PointerLock / 모바일: 조이스틱 + 드래그)
+// ================================================================
+const player = { x: 0, z: 11.5, y: 0, radius: 0.35, eye: 1.6, speed: 3.6, bob: 0, frozen: false, lastMove: performance.now() };
+const keys = new Set();
+const controls = new PointerLockControls(camera, document.body);
+controls.pointerSpeed = 0.8;
+let lockFailed = false, started = false;
+const look = new THREE.Euler(0, 0, 0, 'YXZ');
+
+function setLook(yaw, pitch) {
+  look.set(clamp(pitch, -1.45, 1.45), yaw, 0);
+  camera.quaternion.setFromEuler(look);
+}
+function addLook(dYaw, dPitch) {
+  look.setFromQuaternion(camera.quaternion);
+  setLook(look.y + dYaw, look.x + dPitch);
+}
+
+addEventListener('keydown', e => {
+  if (e.target.closest && e.target.closest('input, textarea, select')) return;
+  keys.add(e.code);
+});
+addEventListener('keyup', e => keys.delete(e.code));
+addEventListener('blur', () => keys.clear());
+
+renderer.domElement.addEventListener('click', () => {
+  if (!started || isTouch) return;
+  if (!controls.isLocked && !lockFailed) controls.lock();
+});
+document.addEventListener('pointerlockerror', () => { lockFailed = true; setHint('드래그해서 둘러보기 · WASD 이동'); });
+controls.addEventListener('lock', () => setHint(defaultHint()));
+controls.addEventListener('unlock', () => setHint('클릭해서 둘러보기 · WASD 이동'));
+
+// 포인터락이 안 되는 환경(iframe 등)용 드래그 시점
+let dragging = null;
+renderer.domElement.addEventListener('mousedown', e => { if (!isTouch && !controls.isLocked) dragging = { x: e.clientX, y: e.clientY }; });
+addEventListener('mouseup', () => dragging = null);
+addEventListener('mousemove', e => {
+  if (!dragging) return;
+  addLook(-(e.clientX - dragging.x) * 0.004, -(e.clientY - dragging.y) * 0.004);
+  dragging = { x: e.clientX, y: e.clientY };
+});
+
+// 모바일 터치: 왼쪽 = 조이스틱, 오른쪽 = 시야
+const joy = { id: null, ox: 0, oy: 0, x: 0, y: 0 };
+const lookTouch = { id: null, x: 0, y: 0, sx: 0, sy: 0, t: 0 };
+const joyEl = $('#joystick'), knob = joyEl.querySelector('.knob');
+const canvasEl = renderer.domElement;
+canvasEl.addEventListener('touchstart', e => {
+  for (const t of e.changedTouches) {
+    if (t.clientX < innerWidth * 0.45 && joy.id === null) {
+      Object.assign(joy, { id: t.identifier, ox: t.clientX, oy: t.clientY, x: 0, y: 0 });
+      joyEl.style.display = 'block'; joyEl.style.left = t.clientX + 'px'; joyEl.style.top = t.clientY + 'px';
+      $('#joyHint').style.display = 'none';
+    } else if (lookTouch.id === null) {
+      Object.assign(lookTouch, { id: t.identifier, x: t.clientX, y: t.clientY, sx: t.clientX, sy: t.clientY, t: performance.now() });
+    }
+  }
+  e.preventDefault();
+}, { passive: false });
+canvasEl.addEventListener('touchmove', e => {
+  for (const t of e.changedTouches) {
+    if (t.identifier === joy.id) {
+      let dx = t.clientX - joy.ox, dy = t.clientY - joy.oy;
+      const len = Math.hypot(dx, dy), max = 50;
+      if (len > max) { dx *= max / len; dy *= max / len; }
+      joy.x = dx / max; joy.y = dy / max;
+      knob.style.transform = `translate(${dx}px, ${dy}px)`;
+    } else if (t.identifier === lookTouch.id) {
+      addLook(-(t.clientX - lookTouch.x) * 0.006, -(t.clientY - lookTouch.y) * 0.006);
+      lookTouch.x = t.clientX; lookTouch.y = t.clientY;
+    }
+  }
+  e.preventDefault();
+}, { passive: false });
+function endTouch(e) {
+  for (const t of e.changedTouches) {
+    if (t.identifier === joy.id) { joy.id = null; joy.x = joy.y = 0; joyEl.style.display = 'none'; knob.style.transform = ''; }
+    else if (t.identifier === lookTouch.id) {
+      const moved = Math.hypot(t.clientX - lookTouch.sx, t.clientY - lookTouch.sy);
+      if (moved < 10 && performance.now() - lookTouch.t < 350) onTap(t.clientX, t.clientY);
+      lookTouch.id = null;
+    }
+  }
+}
+canvasEl.addEventListener('touchend', endTouch);
+canvasEl.addEventListener('touchcancel', endTouch);
+function onTap(x, y) { /* 4단계에서 전시품 선택 연결 */ }
+
+const _fwd = new THREE.Vector3(), _right = new THREE.Vector3();
+function updatePlayer(dt) {
+  let ix = 0, iz = 0;
+  if (!player.frozen) {
+    if (keys.has('KeyW') || keys.has('ArrowUp')) iz += 1;
+    if (keys.has('KeyS') || keys.has('ArrowDown')) iz -= 1;
+    if (keys.has('KeyA') || keys.has('ArrowLeft')) ix -= 1;
+    if (keys.has('KeyD') || keys.has('ArrowRight')) ix += 1;
+    if (joy.id !== null) { ix += joy.x; iz -= joy.y; }
+  }
+  const len = Math.hypot(ix, iz);
+  if (len > 1) { ix /= len; iz /= len; }
+  const moving = len > 0.05;
+  if (moving) {
+    camera.getWorldDirection(_fwd); _fwd.y = 0; _fwd.normalize();
+    _right.crossVectors(_fwd, camera.up).normalize();
+    const sp = player.speed * (keys.has('ShiftLeft') || keys.has('ShiftRight') ? 1.7 : 1) * dt;
+    const dx = (_fwd.x * iz + _right.x * ix) * sp, dz = (_fwd.z * iz + _right.z * ix) * sp;
+    if (!blocked(player.x + dx, player.z, player.radius)) player.x += dx;
+    if (!blocked(player.x, player.z + dz, player.radius)) player.z += dz;
+    player.bob += dt * 9;
+    player.lastMove = performance.now();
+  }
+  const targetY = floorAt(player.x, player.z);
+  player.y += (targetY - player.y) * Math.min(1, dt * 12);
+  const bob = moving ? Math.sin(player.bob) * 0.035 : 0;
+  camera.position.set(player.x, player.y + player.eye + bob, player.z);
+  return moving;
+}
+
+// ================================================================
+//  HUD
+// ================================================================
+function defaultHint() { return isTouch ? '왼쪽 드래그: 걷기 · 오른쪽 드래그: 둘러보기' : 'WASD 이동 · 마우스 둘러보기 · Esc 커서 해제'; }
+function setHint(t) { $('#hint').textContent = t; }
+function toast(html, ms = 4200) {
+  const el = document.createElement('div');
+  el.className = 'toast'; el.innerHTML = html;
+  $('#toasts').append(el);
+  setTimeout(() => { el.classList.add('out'); setTimeout(() => el.remove(), 500); }, ms);
+}
+
+// ================================================================
+//  루프
+// ================================================================
+const clock = new THREE.Clock();
+let fpsAcc = 0, fpsFrames = 0;
+function tick() {
+  const dt = Math.min(clock.getDelta(), 0.05);
+  if (started) updatePlayer(dt);
+  // 프레임이 부족하면 해상도를 조금씩 낮춘다 (모바일 30fps 목표)
+  fpsAcc += dt; fpsFrames++;
+  if (fpsAcc > 2) {
+    const fps = fpsFrames / fpsAcc;
+    if (fps < 32 && pixelRatio > 1) { pixelRatio = Math.max(1, pixelRatio - 0.25); renderer.setPixelRatio(pixelRatio); }
+    fpsAcc = 0; fpsFrames = 0;
+  }
+  renderer.render(scene, camera);
+  labelRenderer.render(scene, camera);
+}
+
+// ================================================================
+//  시작
+// ================================================================
+async function boot() {
+  await ensureFonts('실패박물관FAILUREMUSEUM이곳의모든전시품은한때의욕이있었습니다.');
+  buildLobby();
+  setLook(0, -0.05);
+  camera.position.set(player.x, player.eye, player.z);
+  renderer.setAnimationLoop(tick);
+  $('#visitorNo').textContent = '1';
+  $('#loading').classList.add('done');
+  $('#intro').hidden = false;
+}
+$('#btnEnter').addEventListener('click', () => {
+  $('#intro').hidden = true;
+  $('#hud').hidden = false;
+  started = true;
+  setHint(isTouch ? defaultHint() : '클릭해서 둘러보기 · WASD 이동');
+  if (!isTouch) controls.lock();
+});
+$('#btnHelp').addEventListener('click', () => { controls.unlock(); $('#intro').hidden = false; });
+boot();
+</script>
+</body>
+</html>
