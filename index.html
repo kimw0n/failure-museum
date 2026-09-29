@@ -74,6 +74,50 @@
   #joystick .knob { position: absolute; left: 50%; top: 50%; width: 46px; height: 46px; margin: -23px 0 0 -23px; border-radius: 50%; background: rgba(255,255,255,.35); }
   #joyHint { position: absolute; left: 24px; bottom: 70px; font-size: 12px; color: rgba(255,255,255,.4); pointer-events: none; display: none; }
   body.touch #joyHint { display: block; }
+
+  /* 상세 패널 / 등록 모달 */
+  .paper { background: #f3f0e6; color: #1b1a22; border: 1px solid #000; outline: 4px double #1b1a22; outline-offset: -10px; font-family: var(--serif); }
+  .panel { position: fixed; z-index: 30; right: 16px; top: 64px; width: min(380px, calc(100% - 32px)); max-height: calc(100% - 84px); overflow: auto; padding: 28px 24px 20px; }
+  .panel[hidden], .modal[hidden] { display: none; }
+  .kick { font-size: 12px; letter-spacing: .12em; color: #6b6470; font-family: var(--sans); padding-right: 30px; }
+  .panel h2 { font-size: 23px; margin: 6px 0 14px; line-height: 1.35; word-break: keep-all; }
+  .panel dl { display: grid; grid-template-columns: 70px 1fr; gap: 6px 10px; font-size: 15px; margin: 0 0 14px; }
+  .panel dt { color: #6b6470; } .panel dd { margin: 0; word-break: keep-all; }
+  .epitaph { border-top: 1px solid #bbb; border-bottom: 1px solid #bbb; padding: 12px 4px; text-align: center; font-size: 17px; margin: 0 0 12px; word-break: keep-all; }
+  .emp-count { text-align: center; font-family: var(--sans); font-size: 13px; color: #b3242f; margin: 0 0 10px; }
+  .btn-emp { width: 100%; background: #b3242f; color: #fff; border: 0; padding: 14px; font-size: 17px; font-family: var(--serif); font-weight: 700; }
+  .btn-emp:disabled { background: #8d8791; font-size: 14px; cursor: default; }
+  .btn-emp:not(:disabled):active { transform: scale(.98); }
+  .btn-ghost { width: 100%; background: transparent; border: 1px solid #1b1a22; color: #1b1a22; padding: 11px; font-size: 14px; margin-top: 8px; font-family: var(--sans); }
+  .x { position: absolute; top: 12px; right: 12px; width: 36px; height: 36px; border: 0; background: transparent; font-size: 20px; color: #1b1a22; }
+  .modal { position: fixed; inset: 0; z-index: 35; display: grid; place-items: center; padding: 16px; background: rgba(6, 5, 14, .72); }
+  .form { position: relative; width: min(460px, 100%); max-height: calc(100% - 8px); overflow: auto; padding: 30px 26px 22px; text-align: center; }
+  .form h2 { margin: 4px 0 16px; font-size: 24px; }
+  .form label { display: block; text-align: left; font-family: var(--sans); font-size: 13px; color: #444; margin-bottom: 10px; position: relative; }
+  .form input, .form select { display: block; width: 100%; margin-top: 4px; padding: 10px; font-size: 16px; font-family: var(--serif); border: 1px solid #1b1a22; background: #fff; border-radius: 0; color: #1b1a22; -webkit-appearance: none; appearance: none; }
+  .form select { background: #fff url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8'%3E%3Cpath d='M1 1l5 5 5-5' fill='none' stroke='%23111' stroke-width='2'/%3E%3C/svg%3E") no-repeat right 12px center; }
+  .form label[hidden] { display: none; }
+  .form .count { position: absolute; right: 2px; top: 0; font-size: 11px; color: #888; }
+  .form .opt { color: #999; }
+  .err { color: #b3242f; font-size: 13px; min-height: 18px; margin: 2px 0 10px; font-family: var(--sans); }
+  .row { display: flex; gap: 8px; } .row > * { flex: 1; margin-top: 0; }
+  @media (min-width: 641px) { body.panel-open #toasts { left: 16px; transform: none; width: min(460px, calc(100% - 430px)); } }
+  @media (max-width: 640px) {
+    .panel { left: 0; right: 0; bottom: 0; top: auto; width: 100%; max-height: 64%; padding-bottom: max(20px, env(safe-area-inset-bottom)); }
+  }
+  /* 토스트 / 자막 / 이모지 */
+  .toast { background: rgba(14, 12, 28, .92); border: 1px solid var(--line); padding: 10px 14px; font-size: 14px; text-align: center; animation: tin .35s ease-out; transition: opacity .4s, transform .4s; word-break: keep-all; }
+  .toast.out { opacity: 0; transform: translateY(-8px); }
+  .toast.breaking { background: #b3242f; border-color: #ffcf5a; color: #fff; font-family: var(--serif); font-size: 15px; box-shadow: 0 6px 30px rgba(0,0,0,.5); }
+  .toast.breaking b { background: #fff; color: #b3242f; padding: 1px 7px; margin-right: 8px; font-family: var(--sans); }
+  @keyframes tin { from { opacity: 0; transform: translateY(-10px); } }
+  #subtitle { position: absolute; left: 50%; bottom: calc(max(16px, env(safe-area-inset-bottom)) + 40px); transform: translateX(-50%); width: max-content; max-width: min(640px, calc(100% - 32px)); background: rgba(0, 0, 0, .75); padding: 8px 14px; font-family: var(--serif); font-size: 15px; text-align: center; pointer-events: none; opacity: 0; transition: opacity .3s; word-break: keep-all; }
+  #subtitle.on { opacity: 1; }
+  #subtitle b { color: var(--gold); margin-right: 6px; }
+  #btnLook { position: absolute; right: 16px; bottom: 96px; background: var(--gold); color: #1b1a22; border: 0; padding: 14px 20px; font-size: 15px; font-weight: 700; border-radius: 30px; font-family: var(--serif); box-shadow: 0 4px 16px rgba(0,0,0,.5); }
+  #btnLook[hidden] { display: none; }
+  .emo span { display: inline-block; font-family: var(--sans); font-weight: 700; font-size: 22px; color: #fff; white-space: nowrap; text-shadow: 0 2px 6px #000, 0 0 14px #ff5a7a; animation: emo 1.9s ease-out forwards; }
+  @keyframes emo { 0% { transform: translateY(0) scale(.5); opacity: 0; } 15% { opacity: 1; transform: translateY(-12px) scale(1.2); } 100% { transform: translateY(-120px) scale(1); opacity: 0; } }
 </style>
 <script type="importmap">
 { "imports": {
@@ -109,12 +153,58 @@
   <div id="crosshair"></div>
   <div id="zone">입구 로비</div>
   <div id="topbar">
-    <button id="btnHelp" title="도움말">?</button>
+    <button id="btnRegister">내 실패 전시하기</button>
+    <button id="btnHelp" title="도움말" aria-label="도움말">?</button>
   </div>
+  <div id="subtitle"></div>
+  <button id="btnLook" hidden>자세히 보기</button>
   <div id="toasts"></div>
   <div id="hint">클릭해서 둘러보기 · WASD 이동</div>
   <div id="joyHint">← 여기를 드래그해서 걷기</div>
   <div id="joystick"><div class="knob"></div></div>
+</div>
+
+<div id="detail" class="panel paper" hidden>
+  <button class="x" data-close aria-label="닫기">✕</button>
+  <div class="kick" id="dKicker"></div>
+  <h2 id="dTitle"></h2>
+  <dl>
+    <dt>향년</dt><dd id="dAge"></dd>
+    <dt>사망 원인</dt><dd id="dCause"></dd>
+    <dt>유품</dt><dd id="dRelic"></dd>
+  </dl>
+  <p class="epitaph" id="dEpitaph"></p>
+  <p class="emp-count" id="dEmp"></p>
+  <button id="btnEmpathy" class="btn-emp">ㅠㅠ 나도 이런 적 있음</button>
+  <button id="btnShare" class="btn-ghost">명패 이미지로 저장</button>
+</div>
+
+<div id="register" class="modal" hidden>
+  <form id="regForm" class="form paper" autocomplete="off">
+    <button type="button" class="x" data-close aria-label="닫기">✕</button>
+    <div class="kick">訃 告 作 成</div>
+    <h2>내 실패 전시하기</h2>
+    <label>고인(실패)의 이름 <span class="count"></span>
+      <input name="title" maxlength="40" required placeholder="예: 올해의 다이어트"></label>
+    <label>사망 원인
+      <select name="cause">
+        <option>귀찮음</option><option>마감</option><option>의욕 증발</option><option>팀원 잠수</option>
+        <option>알고 보니 이미 있던 서비스</option><option>그냥 잠</option><option value="기타">기타 (직접 입력)</option>
+      </select></label>
+    <label id="causeOtherWrap" hidden>사망 원인 직접 입력 <span class="count"></span>
+      <input name="causeOther" maxlength="60" placeholder="예: 갑자기 여행 가고 싶어짐"></label>
+    <label>향년 <span class="count"></span>
+      <input name="age" maxlength="60" required placeholder="예: 3일"></label>
+    <label>유품 <span class="opt">(선택)</span> <span class="count"></span>
+      <input name="relic" maxlength="60" placeholder="예: 결제한 알람 앱 프리미엄"></label>
+    <label>묘비명 <span class="opt">(선택)</span> <span class="count"></span>
+      <input name="epitaph" maxlength="60" placeholder="예: 알람은 끝까지 울렸다"></label>
+    <p class="err" id="regErr"></p>
+    <div class="row">
+      <button type="button" class="btn-ghost" data-close>그냥 구경만 할게요</button>
+      <button type="submit" class="btn-solemn">안치하기</button>
+    </div>
+  </form>
 </div>
 
 <script type="module">
@@ -391,7 +481,7 @@ function updateFlicker(dt, now) {
     const t = pick(tubes);
     if (t.parent) {
       flicker = { tube: t, t: rand(.15, .9), light: t.userData.light, base: t.userData.light ? t.userData.light.userData.base : 0 };
-      if (typeof sfx !== 'undefined') sfx.buzz(t.getWorldPosition(new THREE.Vector3()));
+      sfx.buzz(t.getWorldPosition(new THREE.Vector3()));
     }
   }
 }
@@ -891,6 +981,8 @@ function layoutAll() {
   buildFameExhibits(fame);
   buildMorgueExhibits(rest.slice(0, COFFIN_SLOTS.length));
   buildHall(rest.slice(COFFIN_SLOTS.length));
+  computePlacement();
+  collectHits();
 }
 
 function buildMorgueExhibits(list) {
@@ -905,11 +997,11 @@ function buildMorgueExhibits(list) {
     }
     const obj = makeExhibitObject(ex); obj.position.set(x + .15, 1.08, z); obj.rotation.y = Math.PI / 2 + rand(-.3, .3); morgueDyn.add(obj);
     const fr = new THREE.Group(); fr.position.set(x - 1.35, 0, z); fr.rotation.y = Math.PI / 2; morgueDyn.add(fr);
-    box(.05, 1.2, .05, M.black, 0, .6, -.12, fr).rotation.x = -.12;
-    box(.74, .92, .05, M.black, 0, 1.55, 0, fr);
+    box(.05, 1.6, .05, M.black, 0, .8, -.12, fr).rotation.x = -.1;
+    box(.74, .92, .05, M.black, 0, 1.95, 0, fr);
     const pic = textPanel(.62, .8, (c, W, H) => drawPortrait(c, W, H, ex), 420);
-    pic.material.userData.own = true; pic.position.set(0, 1.55, .03); fr.add(pic);
-    for (const s of [-1, 1]) box(.05, .34, .012, M.black, s * .25, 1.9, .035, fr).rotation.z = s * .8;   // 검은 리본
+    pic.material.userData.own = true; pic.position.set(0, 1.95, .03); fr.add(pic);
+    for (const s of [-1, 1]) box(.05, .34, .012, M.black, s * .25, 2.3, .035, fr).rotation.z = s * .8;   // 검은 리본
     const hit = box(2.9, 2.4, 1.3, M.hit, x - .3, 1.2, z, morgueDyn); hit.userData.exhibit = ex;
     anchors.set(ex.id, new THREE.Vector3(x + .15, 1.9, z));
   });
@@ -1020,28 +1112,50 @@ function addLook(dYaw, dPitch) {
 }
 
 addEventListener('keydown', e => {
-  if (e.target.closest && e.target.closest('input, textarea, select')) return;
+  if (e.target.closest && e.target.closest('input, textarea, select')) {
+    if (e.code === 'Escape') closeUI();
+    return;
+  }
+  if (e.code === 'Escape') { closeUI(); return; }
+  if (e.code === 'KeyE' && started) interact();
   keys.add(e.code);
 });
 addEventListener('keyup', e => keys.delete(e.code));
 addEventListener('blur', () => keys.clear());
 
-renderer.domElement.addEventListener('click', () => {
-  if (!started || isTouch) return;
-  if (!controls.isLocked && !lockFailed) controls.lock();
-});
-document.addEventListener('pointerlockerror', () => { lockFailed = true; setHint('드래그해서 둘러보기 · WASD 이동'); });
+function lockPointer() {
+  if (isTouch || lockFailed || controls.isLocked || uiOpen) return;
+  try {
+    const r = document.body.requestPointerLock();
+    if (r && r.catch) r.catch(() => { lockFailed = true; setHint(defaultHint()); });
+  } catch { lockFailed = true; }
+}
+function unlockPointer() { if (controls.isLocked) controls.unlock(); }
+document.addEventListener('pointerlockerror', () => { lockFailed = true; setHint(defaultHint()); });
 controls.addEventListener('lock', () => setHint(defaultHint()));
-controls.addEventListener('unlock', () => setHint('클릭해서 둘러보기 · WASD 이동'));
+controls.addEventListener('unlock', () => setHint(defaultHint()));
+// 시점 고정 상태의 클릭 = 조준한 전시품 보기
+document.addEventListener('mousedown', e => { if (controls.isLocked && e.button === 0) interact(); });
 
-// 포인터락이 안 되는 환경(iframe 등)용 드래그 시점
+// 캔버스 클릭: 전시품을 직접 눌렀으면 열고, 아니면 시점 고정 / 포인터락 불가 환경은 드래그로 둘러보기
 let dragging = null;
-renderer.domElement.addEventListener('mousedown', e => { if (!isTouch && !controls.isLocked) dragging = { x: e.clientX, y: e.clientY }; });
-addEventListener('mouseup', () => dragging = null);
+renderer.domElement.addEventListener('mousedown', e => {
+  if (!isTouch && !controls.isLocked) dragging = { x: e.clientX, y: e.clientY, sx: e.clientX, sy: e.clientY };
+});
+addEventListener('mouseup', e => {
+  if (!dragging) return;
+  const moved = Math.hypot(e.clientX - dragging.sx, e.clientY - dragging.sy);
+  dragging = null;
+  if (moved > 5 || !started || uiOpen || e.target !== renderer.domElement) return;
+  const ex = pickAt(e.clientX / innerWidth * 2 - 1, -(e.clientY / innerHeight) * 2 + 1, 7);
+  if (ex) openDetail(ex);
+  else if (typeof tapNpc === 'function' && tapNpc(e.clientX, e.clientY)) return;
+  else lockPointer();
+});
 addEventListener('mousemove', e => {
   if (!dragging) return;
   addLook(-(e.clientX - dragging.x) * 0.004, -(e.clientY - dragging.y) * 0.004);
-  dragging = { x: e.clientX, y: e.clientY };
+  dragging.x = e.clientX; dragging.y = e.clientY;
 });
 
 // 모바일 터치: 왼쪽 = 조이스틱, 오른쪽 = 시야
@@ -1088,12 +1202,11 @@ function endTouch(e) {
 }
 canvasEl.addEventListener('touchend', endTouch);
 canvasEl.addEventListener('touchcancel', endTouch);
-function onTap(x, y) { /* 4단계에서 전시품 선택 연결 */ }
 
 const _fwd = new THREE.Vector3(), _right = new THREE.Vector3();
 function updatePlayer(dt) {
   let ix = 0, iz = 0;
-  if (!player.frozen) {
+  if (!player.frozen && !uiOpen) {
     if (keys.has('KeyW') || keys.has('ArrowUp')) iz += 1;
     if (keys.has('KeyS') || keys.has('ArrowDown')) iz -= 1;
     if (keys.has('KeyA') || keys.has('ArrowLeft')) ix -= 1;
@@ -1121,14 +1234,347 @@ function updatePlayer(dt) {
 }
 
 // ================================================================
+//  저장소 (로컬 모드: localStorage + 시드)
+// ================================================================
+const LS = {
+  get(k, d) { try { const v = JSON.parse(localStorage.getItem(k)); return v ?? d; } catch { return d; } },
+  set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch { } },
+};
+const LocalStore = {
+  mode: 'local',
+  db() { return LS.get('fm_local_db', { added: [], delta: {} }); },
+  async load() {
+    const db = this.db();
+    return [...SEEDS, ...db.added].map(e => ({ ...e, empathy: e.empathy + (db.delta[e.id] || 0) }));
+  },
+  async add(ex) { const db = this.db(); db.added.push(ex); LS.set('fm_local_db', db); return ex; },
+  async empathize(id) { const db = this.db(); db.delta[id] = (db.delta[id] || 0) + 1; LS.set('fm_local_db', db); return null; },
+  // 로컬 모드의 방문객 번호는 개그용 기본값 + 이 브라우저 방문 횟수
+  async visit() { const n = LS.get('fm_visits', 0) + 1; LS.set('fm_visits', n); return 4811 + n; },
+};
+let Store = LocalStore;
+const mine = { empathized: new Set(LS.get('fm_empathized', [])), created: new Set(LS.get('fm_created', [])) };
+function saveMine() { LS.set('fm_empathized', [...mine.empathized]); LS.set('fm_created', [...mine.created]); }
+
+// ================================================================
+//  금칙어 (욕설 / 광고) — 공백·기호를 지운 뒤 포함 여부 검사
+// ================================================================
+const BANNED = ['시발', '씨발', '시바', 'ㅅㅂ', 'ㅆㅂ', '병신', 'ㅂㅅ', '븅신', '개새', '좆', '존나', '졸라', '지랄', 'ㅈㄹ', '닥쳐', '꺼져', '미친놈', '미친년', '염병', '느금', '니애미', '애미', '애비',
+  'fuck', 'shit', 'bitch', 'asshole',
+  '카지노', '바카라', '토토', '도박', '슬롯', '대출', '리딩방', '수익보장', '고수익', '부업', '텔레그램', '텔레', '카톡문의', '오픈채팅', '광고문의', '홍보문의', '구매대행', '성인', '19금'];
+function hasBanned(text) {
+  if (/(https?:\/\/|www\.|\.(com|net|kr|io|xyz|co)\b)/i.test(text)) return true;
+  const t = text.toLowerCase().replace(/[\s.\-_~!@#$%^&*()+=\[\]{}|\\/:;"'<>,?`0-9]+/g, '');
+  return BANNED.some(w => t.includes(w));
+}
+const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+// ================================================================
+//  배치 정보 (구역/순위/소장 번호)
+// ================================================================
+const placement = new Map();
+function computePlacement() {
+  placement.clear();
+  const fame = topFive(exhibits);
+  const fameIds = new Set(fame.map(e => e.id));
+  const rest = exhibits.filter(e => !fameIds.has(e.id)).sort(byNewest);
+  const nos = [...exhibits].sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt));
+  const no = new Map(nos.map((e, i) => [e.id, i + 1]));
+  fame.forEach((e, i) => placement.set(e.id, { zone: 'fame', rank: i, no: no.get(e.id) }));
+  rest.forEach((e, i) => placement.set(e.id, { zone: i < COFFIN_SLOTS.length ? 'morgue' : 'hall', no: no.get(e.id) }));
+}
+function placeLabel(p) {
+  if (!p) return '';
+  if (p.zone === 'fame') return `불멸의 흑역사관 ${p.rank + 1}위`;
+  return p.zone === 'morgue' ? '신규 안치실' : '메인홀';
+}
+
+// ================================================================
+//  조준 / 탭 → 상세 패널
+// ================================================================
+const raycaster = new THREE.Raycaster();
+const _ndc = new THREE.Vector2();
+let hitList = [], hovered = null, lastRay = 0, uiOpen = null, selected = null, camTween = null;
+function collectHits() {
+  hitList = [];
+  for (const g of [hallGroup, morgueDyn, fameDyn]) if (g) g.traverse(o => { if (o.userData.exhibit) hitList.push(o); });
+}
+function pickAt(nx, ny, far) {
+  raycaster.setFromCamera(_ndc.set(nx, ny), camera);
+  raycaster.far = far;
+  const h = raycaster.intersectObjects(hitList, false)[0];
+  return h ? h.object.userData.exhibit : null;
+}
+function updateHover(now) {
+  if (now - lastRay < 90 || uiOpen || camTween) return;
+  lastRay = now;
+  const ex = pickAt(0, 0, 4.8);
+  if (ex === hovered) return;
+  hovered = ex;
+  $('#crosshair').classList.toggle('on', !!ex);
+  $('#btnLook').hidden = !(ex && isTouch);
+  setHint(defaultHint());
+}
+function interact() { if (hovered && !uiOpen) openDetail(hovered); }
+function onTap(x, y) {
+  if (uiOpen) return;
+  const ex = pickAt(x / innerWidth * 2 - 1, -(y / innerHeight) * 2 + 1, 7);
+  if (ex) openDetail(ex);
+  else if (typeof tapNpc === 'function') tapNpc(x, y);
+}
+
+function openDetail(ex) {
+  selected = ex; uiOpen = 'detail';
+  document.body.classList.add('panel-open');
+  unlockPointer();
+  refreshDetail();
+  $('#detail').hidden = false;
+  $('#btnLook').hidden = true;
+  director('view', ex);
+}
+function refreshDetail() {
+  const ex = selected;
+  if (!ex) return;
+  const p = placement.get(ex.id);
+  $('#dKicker').textContent = `소장품 제 ${p ? p.no : '?'}호 · ${placeLabel(p)}${mine.created.has(ex.id) ? ' · 내가 안치함' : ''}`;
+  $('#dTitle').textContent = ex.title;
+  $('#dAge').textContent = ex.age;
+  $('#dCause').textContent = ex.cause;
+  $('#dRelic').textContent = ex.relic;
+  $('#dEpitaph').textContent = `“${ex.epitaph}”`;
+  $('#dEmp').textContent = `${ex.empathy}명이 “나도 이런 적 있음”을 눌렀습니다`;
+  const done = mine.empathized.has(ex.id);
+  $('#btnEmpathy').disabled = done;
+  $('#btnEmpathy').textContent = done ? '공감 완료 · 함께 슬퍼해 주셔서 감사합니다' : 'ㅠㅠ 나도 이런 적 있음';
+}
+function closeUI() {
+  $('#detail').hidden = true;
+  $('#register').hidden = true;
+  uiOpen = null; selected = null;
+  document.body.classList.remove('panel-open');
+  lastRay = 0; hovered = undefined;
+  setHint(defaultHint());
+}
+
+// ================================================================
+//  공감 → 이모지, 카운트, 순위 변동 속보
+// ================================================================
+async function doEmpathy(ex) {
+  if (!ex || mine.empathized.has(ex.id)) return;
+  mine.empathized.add(ex.id); saveMine();
+  const before = topFive(exhibits).map(e => e.id);
+  ex.empathy += 1;
+  floatEmoji(ex);
+  sfx.pop();
+  director('empathy', ex);
+  refreshDetail();
+  try { const n = await Store.empathize(ex.id); if (typeof n === 'number') ex.empathy = Math.max(ex.empathy, n); } catch { }
+  applyChanges(before);
+}
+function applyChanges(beforeTop) {
+  layoutAll();
+  topFive(exhibits).forEach((e, i) => {
+    const old = beforeTop.indexOf(e.id);
+    if (old === -1 || i < old) announceRank(e, i, old === -1);
+  });
+  refreshDetail();
+}
+function announceRank(ex, rank, isNew) {
+  toast(`<b>속보</b>故「${esc(ex.title)}」님의 실패가 ${rank + 1}위로 ${isNew ? '진입했습니다' : '올라섰습니다'}`, 5500, 'breaking');
+  if (isNew) { confettiBurst(); sfx.fanfare(); }
+}
+function floatEmoji(ex) {
+  const a = anchors.get(ex.id);
+  if (!a) return;
+  ['ㅠㅠ 나도', '🥲', 'ㅠㅠ'].forEach((txt, i) => setTimeout(() => {
+    const el = document.createElement('div');
+    el.className = 'emo';
+    el.innerHTML = `<span>${txt}</span>`;
+    const o = new CSS2DObject(el);
+    o.position.copy(a).add(new THREE.Vector3(rand(-.35, .35), rand(0, .2), rand(-.35, .35)));
+    scene.add(o);
+    setTimeout(() => o.removeFromParent(), 1900);
+  }, i * 200));
+}
+
+// ================================================================
+//  등록 (모달 폼) → 신규 안치실로 카메라 이동
+// ================================================================
+let registeredEver = LS.get('fm_created', []).length > 0;
+function openRegister() {
+  unlockPointer();
+  closeUI();
+  uiOpen = 'register';
+  $('#regErr').textContent = '';
+  $('#register').hidden = false;
+  if (!isTouch) setTimeout(() => $('#regForm [name=title]').focus(), 50);
+}
+function formValues(form) {
+  const f = new FormData(form);
+  const v = k => (f.get(k) || '').toString().trim().replace(/\s+/g, ' ');
+  return { title: v('title'), cause: v('cause') === '기타' ? v('causeOther') : v('cause'), age: v('age'), relic: v('relic'), epitaph: v('epitaph') };
+}
+async function submitRegister(e) {
+  e.preventDefault();
+  const form = e.target, err = $('#regErr');
+  const d = formValues(form);
+  if (!d.title) return err.textContent = '고인(실패)의 이름을 적어 주세요.';
+  if (!d.cause) return err.textContent = '사망 원인을 직접 입력해 주세요.';
+  if (!d.age) return err.textContent = '향년을 적어 주세요. (예: 3일)';
+  if ([...d.title].length > 40 || [d.cause, d.age, d.relic, d.epitaph].some(s => [...s].length > 60)) return err.textContent = '제목은 40자, 나머지는 60자까지입니다.';
+  if (hasBanned(Object.values(d).join(' '))) return err.textContent = '욕설이나 광고로 보이는 표현이 있어요. 고인이 부끄러워합니다.';
+  const last = LS.get('fm_last_reg', 0);
+  if (Date.now() - last < 30000) return err.textContent = `방금 안치하셨어요. ${Math.ceil((30000 - (Date.now() - last)) / 1000)}초만 묵념하고 다시 와 주세요.`;
+  const btn = form.querySelector('[type=submit]');
+  btn.disabled = true; btn.textContent = '안치 중...';
+  const ex = {
+    id: 'u-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+    title: d.title, cause: d.cause, age: d.age,
+    relic: d.relic || '없음 (빈손으로 감)', epitaph: d.epitaph || '고인은 말이 없다',
+    empathy: 0, createdAt: new Date().toISOString(),
+  };
+  let saved = ex;
+  try { saved = await Store.add(ex) || ex; } catch { }
+  btn.disabled = false; btn.textContent = '안치하기';
+  mine.created.add(saved.id); saveMine();
+  LS.set('fm_last_reg', Date.now());
+  registeredEver = true;
+  exhibits.push(saved);
+  await ensureFonts(exhibitText([saved]));
+  layoutAll();
+  closeUI();
+  form.reset(); syncCauseField(); updateCounts();
+  const a = anchors.get(saved.id) || new THREE.Vector3(-15.4, 1.9, 4.4);
+  flyTo(new THREE.Vector3(a.x + 3.3, 1.75, a.z), new THREE.Vector3(a.x - .8, 1.35, a.z), () => {
+    director('registered', saved);
+    sfx.trombone();
+    setHint(defaultHint());
+  });
+  toast(`故「${esc(saved.title)}」 신규 안치실에 안치되었습니다`, 4200);
+}
+function syncCauseField() {
+  const other = $('#regForm [name=cause]').value === '기타';
+  $('#causeOtherWrap').hidden = !other;
+  $('#regForm [name=causeOther]').required = other;
+}
+function updateCounts() {
+  for (const input of document.querySelectorAll('#regForm input[maxlength]')) {
+    const c = input.parentElement.querySelector('.count');
+    if (c) c.textContent = `${[...input.value].length}/${input.maxLength}`;
+  }
+}
+
+// 카메라를 곡선 경로로 부드럽게 이동 (로비 문을 지나 안치실까지)
+function flyTo(pos, lookAt, done) {
+  const start = camera.position.clone();
+  const pts = [start];
+  const z = zoneAt(player.x, player.z);
+  if (z === 'fame' || z === 'stairs') pts.push(new THREE.Vector3(15, 5.4, 7), new THREE.Vector3(8, 1.8, 7));
+  if (z === 'hall') pts.push(new THREE.Vector3(0, 1.8, -.5), new THREE.Vector3(-2, 1.8, 5));
+  if (z !== 'morgue') pts.push(new THREE.Vector3(-8.2, 1.8, 7));
+  pts.push(pos);
+  const curve = new THREE.CatmullRomCurve3(pts, false, 'centripetal');
+  const toQ = new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().lookAt(pos, lookAt, camera.up));
+  camTween = { t: 0, dur: clamp(1.2 + curve.getLength() / 12, 1.4, 3.2), curve, fromQ: camera.quaternion.clone(), toQ, done };
+}
+function updateCamTween(dt) {
+  const tw = camTween;
+  tw.t += dt;
+  const k = clamp(tw.t / tw.dur, 0, 1), e = k < .5 ? 2 * k * k : 1 - Math.pow(-2 * k + 2, 2) / 2;
+  camera.position.copy(tw.curve.getPoint(e));
+  camera.quaternion.slerpQuaternions(tw.fromQ, tw.toQ, e);
+  if (k >= 1) {
+    const p = tw.curve.getPoint(1);
+    player.x = p.x; player.z = p.z; player.y = floorAt(p.x, p.z);
+    camTween = null;
+    tw.done && tw.done();
+  }
+}
+
+// ================================================================
+//  공유 카드: 명패 이미지 PNG
+// ================================================================
+async function drawShareCard(ex) {
+  await ensureFonts(exhibitText([ex]));
+  const W = 1080, H = 1350, c = document.createElement('canvas');
+  c.width = W; c.height = H;
+  const g = c.getContext('2d');
+  const p = placement.get(ex.id), isFame = p && p.zone === 'fame';
+  g.fillStyle = isFame ? '#2a0b12' : '#110f22'; g.fillRect(0, 0, W, H);
+  // 종이 카드
+  const x0 = 90, y0 = 110, cw = W - 180, ch = H - 250;
+  g.fillStyle = isFame ? '#f6e3a8' : '#f3f0e6'; g.fillRect(x0, y0, cw, ch);
+  g.strokeStyle = '#1b1a22'; g.lineWidth = 4; g.strokeRect(x0 + 24, y0 + 24, cw - 48, ch - 48);
+  g.lineWidth = 2; g.strokeRect(x0 + 36, y0 + 36, cw - 72, ch - 72);
+  g.fillStyle = '#111';
+  g.beginPath(); g.moveTo(x0, y0); g.lineTo(x0 + 150, y0); g.lineTo(x0, y0 + 150); g.fill();
+  g.beginPath(); g.moveTo(x0 + cw, y0); g.lineTo(x0 + cw - 150, y0); g.lineTo(x0 + cw, y0 + 150); g.fill();
+  g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillStyle = '#555';
+  g.font = `400 30px ${FONT_SERIF}`; g.fillText(`실 패 박 물 관   소 장 품   제 ${p ? p.no : '?'} 호`, W / 2, y0 + 110);
+  g.fillStyle = '#1b1a22'; g.font = `700 40px ${FONT_SERIF}`; g.fillText('故', W / 2, y0 + 180);
+  g.font = `700 70px ${FONT_SERIF}`;
+  const lines = wrapLines(g, ex.title, cw - 170, 3);
+  lines.forEach((l, i) => g.fillText(l, W / 2, y0 + 270 + i * 86));
+  let y = y0 + 270 + (lines.length - 1) * 86 + 70;
+  g.fillRect(W / 2 - 40, y, 80, 4); y += 64;
+  // 항목: 회색 라벨 + 값 한 줄
+  for (const [k, v] of [['향년', ex.age], ['사망 원인', ex.cause], ['유품', ex.relic]]) {
+    g.font = `400 30px ${FONT_SERIF}`; const wl = g.measureText(k).width;
+    g.font = `400 36px ${FONT_SERIF}`; const wv = Math.min(g.measureText(v).width, cw - 220 - wl);
+    const sx = W / 2 - (wl + 22 + wv) / 2;
+    g.textAlign = 'left';
+    g.font = `400 30px ${FONT_SERIF}`; g.fillStyle = '#7a7280'; g.fillText(k, sx, y);
+    g.font = `400 36px ${FONT_SERIF}`; g.fillStyle = '#1b1a22'; g.fillText(v, sx + wl + 22, y, wv);
+    g.textAlign = 'center';
+    y += 62;
+  }
+  g.font = `700 40px ${FONT_SERIF}`; g.fillStyle = '#1b1a22';
+  wrapLines(g, `“${ex.epitaph}”`, cw - 170, 2).forEach((l, i) => g.fillText(l, W / 2, y + 26 + i * 54));
+  // 도장 / 전당 배지 (카드 아래쪽 여백)
+  g.save(); g.translate(x0 + cw - 170, y0 + ch - 150); g.rotate(-.2);
+  g.strokeStyle = '#b3242f'; g.lineWidth = 8; g.beginPath(); g.arc(0, 0, 84, 0, Math.PI * 2); g.stroke();
+  g.fillStyle = '#b3242f'; g.font = `700 28px ${FONT_SANS}`; g.fillText('공감', 0, -22); g.font = `700 40px ${FONT_SANS}`; g.fillText(`${ex.empathy}명`, 0, 24);
+  g.restore();
+  if (isFame) {
+    g.fillStyle = '#b3242f'; g.fillRect(x0 + 70, y0 + ch - 190, 330, 84);
+    g.fillStyle = '#ffe29a'; g.font = `700 34px ${FONT_SERIF}`; g.fillText(`불멸의 흑역사관 ${p.rank + 1}위`, x0 + 235, y0 + ch - 148);
+  }
+  g.fillStyle = isFame ? '#f5d27a' : '#a9a6c2'; g.font = `400 30px ${FONT_SERIF}`;
+  g.fillText('이곳의 모든 전시품은 한때 의욕이 있었습니다.', W / 2, H - 90);
+  g.font = `400 24px ${FONT_SANS}`; g.fillText(location.host ? location.host + location.pathname : '실패 박물관', W / 2, H - 48);
+  return c;
+}
+async function saveShareCard(ex) {
+  const c = await drawShareCard(ex);
+  c.toBlob(blob => {
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `실패박물관_${ex.title.replace(/[\\/:*?"<>|\s]+/g, '_').slice(0, 30)}.png`;
+    document.body.append(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+    toast('명패 이미지를 저장했습니다. 널리 알려 고인을 기려 주세요.');
+  }, 'image/png');
+}
+
+// 5단계에서 관장/사운드로 교체되는 자리
+function director(kind, ex) { }
+const sfx = { pop() { }, fanfare() { }, trombone() { }, buzz() { } };
+
+// ================================================================
 //  HUD
 // ================================================================
-function defaultHint() { return isTouch ? '왼쪽 드래그: 걷기 · 오른쪽 드래그: 둘러보기' : 'WASD 이동 · 마우스 둘러보기 · Esc 커서 해제'; }
+function defaultHint() {
+  if (hovered) return isTouch ? `「${hovered.title}」 — 탭하거나 [자세히 보기]` : `[E] 또는 클릭 — 「${hovered.title}」 자세히 보기`;
+  if (isTouch) return '왼쪽 드래그: 걷기 · 오른쪽 드래그: 둘러보기 · 전시품 탭: 자세히';
+  if (lockFailed) return '드래그해서 둘러보기 · WASD 이동 · 전시품 클릭';
+  return controls.isLocked ? 'WASD 이동 · 전시품을 조준하고 클릭 · Esc 커서 해제' : '화면을 클릭해서 둘러보기 · WASD 이동';
+}
 function setHint(t) { $('#hint').textContent = t; }
-function toast(html, ms = 4200) {
+function toast(html, ms = 4200, cls = '') {
   const el = document.createElement('div');
-  el.className = 'toast'; el.innerHTML = html;
+  el.className = 'toast ' + cls; el.innerHTML = html;
   $('#toasts').append(el);
+  while ($('#toasts').children.length > 3) $('#toasts').firstChild.remove();
   setTimeout(() => { el.classList.add('out'); setTimeout(() => el.remove(), 500); }, ms);
 }
 
@@ -1140,7 +1586,12 @@ let fpsAcc = 0, fpsFrames = 0;
 function tick() {
   const dt = Math.min(clock.getDelta(), 0.05);
   const now = performance.now();
-  if (started) { updatePlayer(dt); updateZone(); }
+  if (started) {
+    if (camTween) updateCamTween(dt);
+    else updatePlayer(dt);
+    updateZone();
+    updateHover(now);
+  }
   updateAmbient(dt, now);
   // 프레임이 부족하면 해상도를 조금씩 낮춘다 (모바일 30fps 목표)
   fpsAcc += dt; fpsFrames++;
@@ -1156,8 +1607,9 @@ function tick() {
 // ================================================================
 //  시작
 // ================================================================
+let visitorNo = 0;
 async function boot() {
-  exhibits = SEEDS.map(e => ({ ...e }));
+  try { exhibits = await Store.load(); } catch { Store = LocalStore; exhibits = await LocalStore.load(); }
   await ensureFonts(document.querySelector('script[type=module]').textContent + exhibitText(exhibits));
   buildLobby();
   buildMorgue();
@@ -1166,21 +1618,43 @@ async function boot() {
   setLook(0, -0.05);
   camera.position.set(player.x, player.eye, player.z);
   renderer.setAnimationLoop(tick);
-  $('#visitorNo').textContent = '1';
+  try { visitorNo = await Store.visit(); } catch { visitorNo = await LocalStore.visit(); }
+  $('#visitorNo').textContent = visitorNo.toLocaleString('ko-KR');
+  setVisitorBoard(visitorNo.toLocaleString('ko-KR'));
   $('#loading').classList.add('done');
   $('#intro').hidden = false;
 }
 // 콘솔 디버깅용 (예: FM.tp(25, 7, -Math.PI/2))
-window.FM = { player, tp(x, z, yaw = 0, pitch = 0) { player.x = x; player.z = z; setLook(yaw, pitch); } };
+window.FM = {
+  player, tp(x, z, yaw = 0, pitch = 0) { player.x = x; player.z = z; setLook(yaw, pitch); },
+  get exhibits() { return exhibits; }, get store() { return Store.mode; },
+  async card(id) { return (await drawShareCard(exhibits.find(e => e.id === id))).toDataURL(); },
+};
 
+let firstEntry = true;
 $('#btnEnter').addEventListener('click', () => {
   $('#intro').hidden = true;
   $('#hud').hidden = false;
   started = true;
-  setHint(isTouch ? defaultHint() : '클릭해서 둘러보기 · WASD 이동');
-  if (!isTouch) controls.lock();
+  setHint(defaultHint());
+  lockPointer();
+  if (firstEntry) { firstEntry = false; onFirstEnter(); }
 });
-$('#btnHelp').addEventListener('click', () => { controls.unlock(); $('#intro').hidden = false; });
+function onFirstEnter() {
+  toast(`당신은 <b>${visitorNo.toLocaleString('ko-KR')}</b>번째 방문객입니다. 삼가 조의를 표합니다.`, 5000);
+  director('enter');
+}
+$('#btnHelp').addEventListener('click', () => { unlockPointer(); closeUI(); $('#intro').hidden = false; });
+$('#btnRegister').addEventListener('click', openRegister);
+$('#btnLook').addEventListener('click', interact);
+$('#btnEmpathy').addEventListener('click', () => doEmpathy(selected));
+$('#btnShare').addEventListener('click', () => selected && saveShareCard(selected));
+for (const b of document.querySelectorAll('[data-close]')) b.addEventListener('click', closeUI);
+$('#register').addEventListener('click', e => { if (e.target.id === 'register') closeUI(); });
+$('#regForm').addEventListener('submit', submitRegister);
+$('#regForm [name=cause]').addEventListener('change', syncCauseField);
+$('#regForm').addEventListener('input', updateCounts);
+updateCounts();
 boot();
 </script>
 </body>
