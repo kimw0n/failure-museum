@@ -233,8 +233,9 @@ function textPanel(w, h, draw, ppm = 220) {
 // ================================================================
 const staticColliders = [];   // {minX,maxX,minZ,maxZ}
 let dynamicColliders = [];
+let colliderTarget = staticColliders, colliderTag = null;
 function addCollider(list, cx, cz, w, d) {
-  list.push({ minX: cx - w / 2, maxX: cx + w / 2, minZ: cz - d / 2, maxZ: cz + d / 2 });
+  list.push({ minX: cx - w / 2, maxX: cx + w / 2, minZ: cz - d / 2, maxZ: cz + d / 2, tag: colliderTag });
 }
 function blocked(x, z, r) {
   for (const list of [staticColliders, dynamicColliders])
@@ -242,7 +243,12 @@ function blocked(x, z, r) {
       if (x > c.minX - r && x < c.maxX + r && z > c.minZ - r && z < c.maxZ + r) return true;
   return false;
 }
-function floorAt(x, z) { return 0; }
+// 계단 구간은 경사로처럼 처리하고, 전당은 2층 높이
+function floorAt(x, z) {
+  if (x >= STAIR.x1) return STAIR.rise;
+  if (x > STAIR.x0) return clamp((x - STAIR.x0) / (STAIR.x1 - STAIR.x0), 0, 1) * STAIR.rise;
+  return 0;
+}
 
 // 벽: 축 정렬 선분 + 문 구멍
 const WALL_T = 0.3;
@@ -258,7 +264,7 @@ function wallLine(parent, axis, fixed, from, to, height, m, doors = [], y0 = 0, 
     const w = axis === 'x' ? len : WALL_T, d = axis === 'x' ? WALL_T : len;
     const x = axis === 'x' ? mid : fixed, z = axis === 'x' ? fixed : mid;
     box(w, h, d, m, x, yb + h / 2, z, parent);
-    if (collide) addCollider(staticColliders, x, z, w, d);
+    if (collide) addCollider(colliderTarget, x, z, w, d);
   }
 }
 function room(parent, { x0, x1, z0, z1, y = 0, h = 5, wall, floor, ceil, doors = {} }) {
@@ -273,50 +279,414 @@ function room(parent, { x0, x1, z0, z1, y = 0, h = 5, wall, floor, ceil, doors =
 }
 
 // ================================================================
-//  공간: 입구 로비 (1단계는 로비만)
+//  공간 (하나의 건물, 4개 구역)
+//   로비       x[-9,9]   z[0,14]
+//   메인홀     x[-9,9]   z[-L,0]   (작품 수에 따라 L이 늘어남)
+//   신규 안치실 x[-19,-9] z[2,12]
+//   계단       x[9,17]   z[5,9]    y 0→4
+//   전당       x[17,33]  z[-3,17]  y=4
 // ================================================================
 const world = new THREE.Group();
 scene.add(world);
 
 const floorTex = canvasTexture(256, 256, (g, w, h) => {
-  g.fillStyle = '#1e1a33'; g.fillRect(0, 0, w, h);
-  g.fillStyle = '#29244a'; g.fillRect(0, 0, w / 2, h / 2); g.fillRect(w / 2, h / 2, w / 2, h / 2);
-  g.strokeStyle = 'rgba(0,0,0,.35)'; g.lineWidth = 3; g.strokeRect(0, 0, w, h);
+  g.fillStyle = '#bdbdbd'; g.fillRect(0, 0, w, h);
+  g.fillStyle = '#ffffff'; g.fillRect(0, 0, w / 2, h / 2); g.fillRect(w / 2, h / 2, w / 2, h / 2);
+  g.strokeStyle = 'rgba(0,0,0,.25)'; g.lineWidth = 3; g.strokeRect(0, 0, w, h);
 });
 floorTex.wrapS = floorTex.wrapT = THREE.RepeatWrapping;
 function floorMat(color, repeatX, repeatZ) {
   const t = floorTex.clone(); t.needsUpdate = true; t.repeat.set(repeatX, repeatZ);
-  return new THREE.MeshLambertMaterial({ color, map: t });
+  const m = new THREE.MeshLambertMaterial({ color, map: t });
+  m.userData.own = true;
+  return m;
 }
 const M = {
-  wall: mat(0x2b2452), wallDeep: mat(0x221c44), ceil: mat(0x15122a),
-  trim: mat(0x0e0c1c), white: mat(0xeeeeee), black: mat(0x111111),
-  wood: mat(0x5b3a26), gold: mat(0xe0b24a, { emissive: 0x3a2800 }),
+  wall: mat(0x2b2452), wallDeep: mat(0x1d1a36), ceil: mat(0x15122a),
+  trim: mat(0x0e0c1c), white: mat(0xeeeeee), black: mat(0x16151c), cream: mat(0xf2ecd8),
+  wood: mat(0x5b3a26), woodDark: mat(0x3a2418), woodLight: mat(0x8a5a36),
+  gold: mat(0xe8b84a, { emissive: 0x4a3000 }),
+  fameWall: mat(0x4a1624), carpet: mat(0xa3202c), pedestal: mat(0x3b3566),
+  glass: new THREE.MeshLambertMaterial({ color: 0xcfe0ff, transparent: true, opacity: 0.16, depthWrite: false }),
   tube: new THREE.MeshBasicMaterial({ color: 0xf2f6ff }),
+  tubeOff: new THREE.MeshBasicMaterial({ color: 0x4a4d5c }),
+  flame: new THREE.MeshBasicMaterial({ color: 0xffc35a }),
+  hit: new THREE.MeshBasicMaterial({ visible: false }),
+  beam: new THREE.MeshBasicMaterial({ color: 0xffe3a0, transparent: true, opacity: 0.09, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide }),
 };
 
+function disposeGroup(g) {
+  g.traverse(o => {
+    if (o.material && o.material.userData && o.material.userData.own) {
+      if (o.material.map) o.material.map.dispose();
+      o.material.dispose();
+    }
+  });
+  g.removeFromParent();
+}
+
+// 표지판 / 삐뚤어진 액자
+function signBoard(text, w = 2.6, h = .55, { bg = '#0f0e22', fg = '#f1eee4', border = '#e0b24a', size = .5, font = FONT_SERIF } = {}) {
+  const m = textPanel(w, h, (c, W, H) => {
+    c.fillStyle = bg; c.fillRect(0, 0, W, H);
+    c.strokeStyle = border; c.lineWidth = 6; c.strokeRect(8, 8, W - 16, H - 16);
+    c.fillStyle = fg; c.textAlign = 'center'; c.textBaseline = 'middle';
+    c.font = `700 ${H * size}px ${font}`; c.fillText(text, W / 2, H / 2 + H * .03, W - 30);
+  });
+  m.material.userData.own = true;
+  return m;
+}
+function crookedFrame(parent, text, sub, x, y, z, rotY, w = 1.3, h = 1.0) {
+  const g = new THREE.Group(); g.position.set(x, y, z); g.rotation.y = rotY; parent.add(g);
+  box(w + .14, h + .14, .06, M.woodLight, 0, 0, 0, g);
+  const p = textPanel(w, h, (c, W, H) => {
+    c.fillStyle = '#efe7d0'; c.fillRect(0, 0, W, H);
+    c.fillStyle = '#2a2233'; c.textAlign = 'center'; c.textBaseline = 'middle';
+    c.font = `700 ${H * .16}px ${FONT_SERIF}`;
+    const lines = wrapLines(c, text, W * .84, 3);
+    lines.forEach((l, i) => c.fillText(l, W / 2, H * .42 + (i - (lines.length - 1) / 2) * H * .19));
+    c.fillStyle = '#7a6f80'; c.font = `400 ${H * .09}px ${FONT_SERIF}`; c.fillText(sub, W / 2, H * .85);
+  }, 180);
+  p.material.userData.own = true;
+  p.position.z = .035; g.add(p);
+  g.rotation.z = rand(-.12, .12) || .05;   // 살짝 삐뚤어짐
+  return g;
+}
+function signPost(parent, x, z, rotY, lines) {
+  const g = new THREE.Group(); g.position.set(x, 0, z); g.rotation.y = rotY; parent.add(g);
+  box(.1, 2.6, .1, M.woodDark, 0, 1.3, 0, g);
+  lines.forEach(([text, tilt], i) => {
+    const s = signBoard(text, 2.1, .42, { size: .46 });
+    s.position.set(0, 2.35 - i * .52, .06); s.rotation.z = tilt; g.add(s);
+    const back = box(2.12, .44, .04, M.woodDark, 0, 2.35 - i * .52, 0.02, g); back.rotation.z = tilt;
+  });
+  addCollider(staticColliders, x, z, .3, .3);
+  return g;
+}
+
+// 형광등 (가끔 깜빡임)
+const tubes = [];
+function tube(parent, x, y, z, len = 2.4, rotY = 0) {
+  const t = box(len, .07, .16, M.tube, x, y, z, parent);
+  t.rotation.y = rotY;
+  box(len + .1, .05, .26, M.trim, x, y + .06, z, parent).rotation.y = rotY;
+  tubes.push(t);
+  return t;
+}
+let flicker = null;
+function updateFlicker(dt, now) {
+  if (flicker) {
+    flicker.t -= dt;
+    const on = Math.sin(now * 0.09) > 0.2;
+    flicker.tube.material = on ? M.tube : M.tubeOff;
+    if (flicker.light) flicker.light.intensity = flicker.base * (on ? 1 : 0.35);
+    if (flicker.t <= 0) {
+      flicker.tube.material = M.tube;
+      if (flicker.light) flicker.light.intensity = flicker.base;
+      flicker = null;
+    }
+  } else if (Math.random() < dt * 0.35 && tubes.length) {
+    const t = pick(tubes);
+    if (t.parent) {
+      flicker = { tube: t, t: rand(.15, .9), light: t.userData.light, base: t.userData.light ? t.userData.light.userData.base : 0 };
+      if (typeof sfx !== 'undefined') sfx.buzz(t.getWorldPosition(new THREE.Vector3()));
+    }
+  }
+}
+
+// ---------- 로비 ----------
+let visitorBoard;
 function buildLobby() {
   const g = new THREE.Group(); world.add(g);
-  room(g, { x0: -9, x1: 9, z0: 0, z1: 14, h: 5, wall: M.wall, floor: floorMat(0xffffff, 9, 7), ceil: M.ceil });
-  // 걸레받이
-  for (const [x, z, w, d] of [[0, 0.16, 18, .04], [0, 13.84, 18, .04], [-8.84, 7, .04, 14], [8.84, 7, .04, 14]]) box(w, .2, d, M.trim, x, .1, z, g);
-  // 정면 현판
-  const title = textPanel(7.2, 1.4, (c, W, H) => {
+  room(g, { x0: -9, x1: 9, z0: 0, z1: 14, h: 5, wall: M.wall, floor: floorMat(0x4d477e, 9, 7), ceil: M.ceil,
+    doors: { n: [[-3, 3]], w: [[5, 9]], e: [[5, 9]] } });
+  for (const [x, z, w, d] of [[-6, 0.16, 6, .04], [6, 0.16, 6, .04], [0, 13.84, 18, .04]]) box(w, .2, d, M.trim, x, .1, z, g);
+  // 정면 현판 (메인홀 입구 위)
+  const title = textPanel(6.4, 1.25, (c, W, H) => {
     c.fillStyle = '#0e0c1c'; c.fillRect(0, 0, W, H);
     c.strokeStyle = '#e0b24a'; c.lineWidth = 8; c.strokeRect(14, 14, W - 28, H - 28);
     c.fillStyle = '#f3efe2'; c.textAlign = 'center'; c.textBaseline = 'middle';
     c.font = `700 ${H * .42}px ${FONT_SERIF}`; c.fillText('실 패 박 물 관', W / 2, H * .42);
     c.fillStyle = '#e0b24a'; c.font = `400 ${H * .15}px ${FONT_SERIF}`; c.fillText('F A I L U R E   M U S E U M', W / 2, H * .77);
   });
-  title.position.set(0, 3.9, 0.17); g.add(title);
-  const motto = textPanel(6, .5, (c, W, H) => {
-    c.fillStyle = '#c9c4e6'; c.textAlign = 'center'; c.textBaseline = 'middle';
+  title.position.set(0, 4.1, 0.17); g.add(title);
+  const motto = textPanel(6, .42, (c, W, H) => {
+    c.fillStyle = '#d6d1f2'; c.textAlign = 'center'; c.textBaseline = 'middle';
     c.font = `400 ${H * .5}px ${FONT_SERIF}`; c.fillText('이곳의 모든 전시품은 한때 의욕이 있었습니다.', W / 2, H / 2);
   });
-  motto.position.set(0, 2.9, 0.17); g.add(motto);
+  motto.position.set(0, 3.25, 0.17); g.add(motto);
+
+  // 슬픔 안내데스크
+  box(4.2, 1.05, 1.0, M.woodDark, 0, .525, 7.6, g);
+  box(4.4, .08, 1.2, M.woodLight, 0, 1.09, 7.6, g);
+  addCollider(staticColliders, 0, 7.6, 4.4, 1.2);
+  const deskSign = textPanel(3.2, .5, (c, W, H) => {
+    c.fillStyle = '#111018'; c.fillRect(0, 0, W, H);
+    c.fillStyle = '#f2ecd8'; c.textAlign = 'center'; c.textBaseline = 'middle';
+    c.font = `700 ${H * .52}px ${FONT_SERIF}`; c.fillText('슬픔 안내데스크', W / 2, H / 2 + 2);
+  });
+  deskSign.position.set(0, .66, 8.11); g.add(deskSign);
+  // 데스크 소품: 티슈, 방명록, 번호표
+  box(.34, .14, .2, M.white, 1.5, 1.2, 7.6, g);
+  mesh(geo('sphere', .08, 6, 4), M.white, 1.5, 1.3, 7.6, g).scale.set(1, 1.3, .5);
+  box(.6, .04, .42, M.cream, -1.2, 1.15, 7.7, g).rotation.y = .2;
+  box(.3, .36, .24, mat(0xb3242f), -.4, 1.3, 7.55, g);
+  // 방문객 카운터 전광판
+  visitorBoard = new THREE.Group(); visitorBoard.position.set(-3.8, 0, 8.6); visitorBoard.rotation.y = .35; g.add(visitorBoard);
+  box(.08, 1.6, .08, M.black, 0, .8, 0, visitorBoard);
+  addCollider(staticColliders, -3.8, 8.6, .4, .4);
+  setVisitorBoard('—');
+
+  // 방향 표지판
+  signPost(g, 4.2, 10.2, -0.25, [['← 울음방 (신규 안치실)', .03], ['불멸의 흑역사관 → 계단 ↑', -.04], ['↑ 일반 전시관', .02]]);
+  const w = signBoard('신규 안치실 · 울음방', 3, .5); w.position.set(-8.83, 3.45, 7); w.rotation.y = Math.PI / 2; g.add(w);
+  const e = signBoard('전당 ↑  (계단 16칸, 포기 금지)', 3.4, .5, { size: .42 }); e.position.set(8.83, 3.45, 7); e.rotation.y = -Math.PI / 2; g.add(e);
+  // 액자
+  crookedFrame(g, '초심', '(2019 ~ 2019)', -8.8, 2.3, 2.6, Math.PI / 2);
+  crookedFrame(g, '계획표_v17_최종_진짜최종', '관장 개인 소장', -8.8, 2.3, 11.5, Math.PI / 2, 1.4, 1.0);
+  crookedFrame(g, '다음 주부터', '매주 새로 걸림', 8.8, 2.3, 2.6, -Math.PI / 2);
+  crookedFrame(g, '의욕 (행방불명)', '보신 분은 연락 바람', 8.8, 2.3, 11.5, -Math.PI / 2);
+  crookedFrame(g, '입구', '들어오면 못 나감 (농담)', 0, 2.8, 13.82, Math.PI, 1.6, .9);
   // 형광등
-  for (const z of [3.5, 10.5]) box(3, .08, .18, M.tube, 0, 4.94, z, g);
-  const light = new THREE.PointLight(0xe8ecff, 18, 20, 1); light.position.set(0, 4.4, 7); g.add(light);
+  for (const z of [3.5, 10.5]) { tube(g, -2.5, 4.92, z); tube(g, 2.5, 4.92, z); }
+  const light = new THREE.PointLight(0xe8ecff, 16, 22, 1); light.position.set(0, 4.3, 7); light.userData.base = 16; g.add(light);
+  tubes[tubes.length - 1].userData.light = light;
+}
+function setVisitorBoard(n) {
+  const old = visitorBoard.getObjectByName('screen');
+  if (old) { disposeGroup(old); }
+  const s = textPanel(1.5, .8, (c, W, H) => {
+    c.fillStyle = '#090812'; c.fillRect(0, 0, W, H);
+    c.strokeStyle = '#333'; c.lineWidth = 10; c.strokeRect(0, 0, W, H);
+    c.fillStyle = '#9aa0c8'; c.textAlign = 'center'; c.textBaseline = 'middle';
+    c.font = `400 ${H * .13}px ${FONT_SANS}`; c.fillText('누적 조문객', W / 2, H * .2);
+    c.fillStyle = '#ff5a4a'; c.font = `700 ${H * .38}px ${FONT_SANS}`; c.fillText(String(n), W / 2, H * .55);
+    c.fillStyle = '#9aa0c8'; c.font = `400 ${H * .11}px ${FONT_SANS}`; c.fillText('당신도 그중 한 명입니다', W / 2, H * .85);
+  }, 200);
+  s.name = 'screen'; s.material.userData.own = true;
+  s.position.y = 1.9; visitorBoard.add(s);
+}
+
+// ---------- 메인홀 (동적: 작품 수에 따라 길어짐) ----------
+const HALL = { cols: [-6.3, -2.1, 2.1, 6.3], rowGap: 4.6, firstZ: -4.4, max: 48 };
+let hallGroup = null, hallLen = 20;
+const hallLights = [new THREE.PointLight(0xeef2ff, 14, 20, 1), new THREE.PointLight(0xeef2ff, 14, 20, 1)];
+hallLights.forEach(l => { l.userData.base = 14; scene.add(l); });
+function buildHall(list) {
+  if (hallGroup) disposeGroup(hallGroup);
+  tubes.splice(0, tubes.length, ...tubes.filter(t => t.parent && !isInHall(t)));
+  hallGroup = new THREE.Group(); world.add(hallGroup);
+  dynamicColliders = dynamicColliders.filter(c => c.tag !== 'hall');
+  colliderTarget = dynamicColliders; colliderTag = 'hall';
+  const shown = list.slice(0, HALL.max);
+  const rows = Math.max(3, Math.ceil(shown.length / HALL.cols.length));
+  hallLen = Math.max(18, 7 + rows * HALL.rowGap);
+  room(hallGroup, { x0: -9, x1: 9, z0: -hallLen, z1: 0, h: 5, wall: M.wall, floor: floorMat(0x423d6e, 9, hallLen / 2), ceil: M.ceil, doors: { s: false } });
+  // 입구 안내판
+  const s = signBoard('최신 실패순 전시 · 만지지 마시오 (이미 망가짐)', 5, .45, { size: .42 });
+  s.position.set(0, 3.9, -.17); s.rotation.y = Math.PI; hallGroup.add(s);
+  shown.forEach((ex, i) => {
+    const r = Math.floor(i / HALL.cols.length), c = i % HALL.cols.length;
+    makeCase(ex, HALL.cols[c], HALL.firstZ - r * HALL.rowGap, hallGroup);
+  });
+  // 형광등: 줄마다
+  for (let r = 0; r < rows; r++) {
+    const z = HALL.firstZ - r * HALL.rowGap + 1.6;
+    tube(hallGroup, -4.2, 4.92, z); tube(hallGroup, 4.2, 4.92, z);
+  }
+  const hallTubes = tubes.filter(isInHall);
+  hallLights[0].position.set(0, 4.3, -hallLen * .28); hallLights[1].position.set(0, 4.3, -hallLen * .72);
+  hallTubes[0].userData.light = hallLights[0];
+  hallTubes[hallTubes.length - 1].userData.light = hallLights[1];
+  // 벽 액자 + 막다른 벽
+  const frames = [['작심삼일 (원본)', '3일간 전시 후 철거 예정'], ['내일의 나에게', '수신 거부'], ['갓생', '미완성 · 작가 불명'], ['버킷리스트', '버킷만 남음'], ['자기계발서 7권', '포장 미개봉'], ['운동 인증 1일차', '2일차는 소실됨']];
+  for (let i = 0; i * 7 + 4 < hallLen - 2; i++) {
+    const f = frames[i % frames.length], z = -4 - i * 7;
+    crookedFrame(hallGroup, f[0], f[1], i % 2 ? 8.8 : -8.8, 2.4, z, i % 2 ? -Math.PI / 2 : Math.PI / 2);
+  }
+  const extra = list.length - shown.length;
+  const end = signBoard(extra > 0 ? `나머지 ${extra}점은 지하 수장고에서 숙면 중` : '막다른 길 · 인생처럼', 4.4, .5, { size: .42 });
+  end.position.set(0, 2.6, -hallLen + .17); hallGroup.add(end);
+  colliderTarget = staticColliders; colliderTag = null;
+}
+function isInHall(o) { let p = o; while (p) { if (p === hallGroup) return true; p = p.parent; } return false; }
+
+// ---------- 신규 안치실 ----------
+const COFFIN_SLOTS = [[-15.6, 4.4], [-15.6, 7], [-15.6, 9.6]];
+let morgueGroup = null;
+function buildMorgue() {
+  const g = new THREE.Group(); world.add(g);
+  room(g, { x0: -19, x1: -9, z0: 2, z1: 12, h: 4, wall: M.wallDeep, floor: floorMat(0x3a3a55, 5, 5), ceil: M.ceil, doors: { e: false } });
+  const s = signBoard('신규 안치실 — 방금 돌아가신 계획들', 5, .55, { size: .44 });
+  s.position.set(-18.83, 3.2, 7); s.rotation.y = Math.PI / 2; g.add(s);
+  const s2 = signBoard('여기서 우시면 됩니다 (휴지 비치)', 3.4, .42, { size: .44, border: '#8a8aa0' });
+  s2.position.set(-14, 2.6, 2.17); g.add(s2);
+  // 관 3개 + 받침 + 초
+  for (const [x, z] of COFFIN_SLOTS) {
+    box(2.1, .12, .9, M.woodLight, x, 1.02, z, g);          // 뚜껑
+    box(2.0, .5, .8, M.woodDark, x, .72, z, g);             // 관
+    for (const dx of [-.8, .8]) box(.12, .46, .7, M.black, x + dx, .23, z, g);
+    for (const dz of [-.62, .62]) {
+      box(.16, 1.0, .16, M.black, x + 1.25, .5, z + dz, g);
+      mesh(geo('cyl', .05, .05, .24, 6), M.cream, x + 1.25, 1.12, z + dz, g);
+      const f = mesh(geo('sphere', .045, 6, 4), M.flame, x + 1.25, 1.28, z + dz, g); f.scale.y = 1.6;
+      candles.push(f);
+    }
+    addCollider(staticColliders, x + .1, z, 2.5, 1.2);
+  }
+  // 근조 화환 2개
+  for (const z of [3, 11]) wreath(g, -18.3, z);
+  const light = new THREE.PointLight(0xa9b8ff, 10, 14, 1); light.position.set(-14, 3.5, 7); g.add(light);
+  tube(g, -14, 3.92, 7, 3);
+}
+const candles = [];
+function wreath(parent, x, z) {
+  const g = new THREE.Group(); g.position.set(x, 0, z); g.rotation.y = Math.PI / 2; parent.add(g);
+  for (const dx of [-.3, .3]) box(.05, 1.4, .05, M.woodDark, dx, .7, 0, g).rotation.z = dx * .5;
+  for (let i = 0; i < 12; i++) {
+    const a = i / 12 * Math.PI * 2;
+    mesh(geo('sphere', .13, 6, 4), i % 3 ? M.white : mat(0xf6e27a), Math.cos(a) * .42, 1.75 + Math.sin(a) * .42, 0, g);
+  }
+  const rib = textPanel(.2, .9, (c, W, H) => {
+    c.fillStyle = '#f7f3ea'; c.fillRect(0, 0, W, H);
+    c.fillStyle = '#111'; c.textAlign = 'center'; c.textBaseline = 'middle'; c.font = `700 ${W * .7}px ${FONT_SERIF}`;
+    [...'謹弔근조'].slice(0, 2).forEach((ch, i) => c.fillText(ch, W / 2, H * (.3 + i * .35)));
+  }, 200);
+  rib.material.userData.own = true;
+  rib.position.set(0, 1.4, .06); g.add(rib);
+  addCollider(staticColliders, x, z, .5, 1);
+}
+
+// ---------- 계단 + 불멸의 흑역사관 ----------
+const STAIR = { x0: 9, x1: 17, z0: 5, z1: 9, rise: 4, steps: 16 };
+const FAME_Y = STAIR.rise;
+const PODIUMS = [ // 순위별 [z, 높이]
+  [7, 1.8], [4.5, 1.4], [9.5, 1.15], [2, .9], [12, .65],
+];
+const PODIUM_X = 28.5;
+const beams = [];
+function buildStairsAndFame() {
+  const g = new THREE.Group(); world.add(g);
+  // 계단 통로
+  const n = STAIR.steps, sd = (STAIR.x1 - STAIR.x0) / n, sh = STAIR.rise / n;
+  for (let i = 0; i < n; i++) {
+    const h = (i + 1) * sh;
+    box(sd, h, STAIR.z1 - STAIR.z0, i % 2 ? M.carpet : mat(0x8e1b26), STAIR.x0 + sd * (i + .5), h / 2, (STAIR.z0 + STAIR.z1) / 2, g);
+  }
+  wallLine(g, 'x', STAIR.z0, STAIR.x0, STAIR.x1, 9, M.fameWall);
+  wallLine(g, 'x', STAIR.z1, STAIR.x0, STAIR.x1, 9, M.fameWall);
+  const sc = mesh(geo('plane', STAIR.x1 - STAIR.x0, STAIR.z1 - STAIR.z0), M.ceil, 13, 8.9, 7, g); sc.rotation.x = Math.PI / 2;
+  const cheer = signBoard('거의 다 왔습니다 (거짓말)', 3, .45, { size: .44 });
+  cheer.position.set(13, 5.2, 5.17); g.add(cheer);
+  crookedFrame(g, '계단 오르기 챌린지', '1일 만에 종료', 13, 4.2, 8.83, Math.PI, 1.2, .8);
+  const stairLight = new THREE.PointLight(0xffd9a0, 8, 12, 1); stairLight.position.set(13, 6.5, 7); g.add(stairLight);
+
+  // 전당 본실
+  room(g, { x0: 17, x1: 33, z0: -3, z1: 17, y: FAME_Y, h: 7, wall: M.fameWall, floor: floorMat(0x6b2a38, 8, 10), ceil: mat(0x1c0a10),
+    doors: { w: [[5, 9]] } });
+  // 금색 몰딩
+  for (const [x, z, w, d] of [[25, -2.84, 16, .04], [25, 16.84, 16, .04], [32.84, 7, .04, 20]]) {
+    box(w, .12, d, M.gold, x, FAME_Y + .06, z, g); box(w, .1, d, M.gold, x, FAME_Y + 6.4, z, g);
+  }
+  // 붉은 카펫
+  box(PODIUM_X - 17.8, .03, 2.4, M.carpet, (17 + PODIUM_X - 1) / 2, FAME_Y + .015, 7, g);
+  for (const dz of [-1.25, 1.25]) box(PODIUM_X - 17.8, .035, .1, M.gold, (17 + PODIUM_X - 1) / 2, FAME_Y + .02, 7 + dz, g);
+  // 현판
+  const banner = textPanel(8, 1.5, (c, W, H) => {
+    const grd = c.createLinearGradient(0, 0, 0, H); grd.addColorStop(0, '#3a0d16'); grd.addColorStop(1, '#1d060b');
+    c.fillStyle = grd; c.fillRect(0, 0, W, H);
+    c.strokeStyle = '#e8b84a'; c.lineWidth = 10; c.strokeRect(16, 16, W - 32, H - 32);
+    c.fillStyle = '#f5d27a'; c.textAlign = 'center'; c.textBaseline = 'middle';
+    c.font = `700 ${H * .38}px ${FONT_SERIF}`; c.fillText('불멸의 흑역사관', W / 2, H * .42);
+    c.font = `400 ${H * .14}px ${FONT_SERIF}`; c.fillStyle = '#e9c9a0'; c.fillText('HALL OF IMMORTAL FAILURES · 공감으로 영생을 얻은 자들', W / 2, H * .76);
+  });
+  banner.position.set(32.83, FAME_Y + 5.2, 7); banner.rotation.y = -Math.PI / 2; g.add(banner);
+  // 포디움 1~5위
+  PODIUMS.forEach(([z, h], i) => {
+    box(2.2, h, 2.2, i === 0 ? M.gold : mat(0x2a1a22), PODIUM_X, FAME_Y + h / 2, z, g);
+    box(2.3, .08, 2.3, M.gold, PODIUM_X, FAME_Y + h, z, g);
+    const num = textPanel(.7, .5, (c, W, H) => {
+      c.fillStyle = i === 0 ? '#2a1a0a' : '#e8b84a'; c.textAlign = 'center'; c.textBaseline = 'middle';
+      c.font = `700 ${H * .8}px ${FONT_SERIF}`; c.fillText(`${i + 1}위`, W / 2, H / 2);
+    });
+    num.material.userData.own = true;
+    num.position.set(PODIUM_X - 1.105, FAME_Y + h - .3, z); num.rotation.y = -Math.PI / 2; g.add(num);
+    addCollider(staticColliders, PODIUM_X, z, 2.3, 2.3);
+    // 스포트라이트 빛기둥 (가짜 볼륨 조명)
+    const beam = mesh(geo('cone', 1.3, 7 - h, 12, 1, true), M.beam, PODIUM_X, FAME_Y + h + (7 - h) / 2, z, g);
+    beam.userData.phase = i;
+    beams.push(beam);
+  });
+  // 벨벳 로프
+  for (const z of [5.4, 8.6]) for (let x = 20; x < 26; x += 2) {
+    box(.08, .9, .08, M.gold, x, FAME_Y + .45, z, g);
+    mesh(geo('sphere', .07, 6, 4), M.gold, x, FAME_Y + .95, z, g);
+    if (x + 2 < 26) { const r = box(2, .05, .05, M.carpet, x + 1, FAME_Y + .8, z, g); }
+  }
+  for (const z of [5.4, 8.6]) addCollider(staticColliders, 23, z, 6, .15);
+  crookedFrame(g, '명예의 전당 입성 조건', '공감 많이 받기 (그게 다임)', 17.2, FAME_Y + 2.4, 13, Math.PI / 2, 1.4, 1);
+  crookedFrame(g, '여기까지 온 당신도', '사실 대단한 겁니다', 17.2, FAME_Y + 2.4, 1, Math.PI / 2, 1.4, 1);
+  // 조명: 금빛 스포트 2개 (모바일 고려해서 최소한만)
+  const s1 = new THREE.SpotLight(0xffd27a, 60, 16, .7, .5, 1); s1.position.set(PODIUM_X - 2, FAME_Y + 6.8, 7); s1.target.position.set(PODIUM_X, FAME_Y, 7);
+  const warm = new THREE.PointLight(0xff9a7a, 12, 18, 1); warm.position.set(21, FAME_Y + 5, 7);
+  g.add(s1, s1.target, warm);
+}
+function fameStatuePos(rank) { const [z, h] = PODIUMS[rank]; return new THREE.Vector3(PODIUM_X, FAME_Y + h + .04, z); }
+
+// ---------- 전시 진열장 ----------
+function makeCase(ex, x, z, parent) {
+  const g = new THREE.Group(); g.position.set(x, 0, z); parent.add(g);
+  box(1.1, 1.0, 1.1, M.pedestal, 0, .5, 0, g);
+  box(1.18, .06, 1.18, M.trim, 0, 1.03, 0, g);
+  box(1.0, 1.0, 1.0, M.glass, 0, 1.56, 0, g);
+  box(1.06, .05, 1.06, M.trim, 0, 2.085, 0, g);
+  const obj = makeExhibitObject(ex); obj.position.y = 1.06; obj.rotation.y = rand(-.4, .4); g.add(obj);
+  const plac = makePlacard(ex); plac.position.set(0, .62, .565); plac.rotation.x = -.22; plac.rotation.z = rand(-.06, .06); g.add(plac);
+  const hit = box(1.3, 2.3, 1.3, M.hit, 0, 1.15, 0, g); hit.userData.exhibit = ex;
+  addCollider(colliderTarget, x, z, 1.2, 1.2);
+  return g;
+}
+// 3단계에서 사망 원인별 오브젝트로 교체
+function makeExhibitObject(ex) {
+  const g = new THREE.Group();
+  box(.4, .4, .4, mat(0xd9a441), 0, .3, 0, g);
+  return g;
+}
+function makePlacard(ex) {
+  const p = textPanel(.9, .42, (c, W, H) => {
+    c.fillStyle = '#f2ecd8'; c.fillRect(0, 0, W, H);
+    c.fillStyle = '#222'; c.textAlign = 'center'; c.textBaseline = 'middle';
+    c.font = `700 ${H * .2}px ${FONT_SERIF}`; c.fillText(ex.title, W / 2, H / 2);
+  }, 400);
+  p.material.userData.own = true;
+  return p;
+}
+
+// ---------- 구역 판정 ----------
+const ZONES = { lobby: '입구 로비', hall: '메인홀 · 일반 전시관', morgue: '신규 안치실', stairs: '전당 가는 계단', fame: '불멸의 흑역사관' };
+function zoneAt(x, z) {
+  if (x >= STAIR.x1) return 'fame';
+  if (x > STAIR.x0) return 'stairs';
+  if (x < -9) return 'morgue';
+  if (z < 0) return 'hall';
+  return 'lobby';
+}
+let currentZone = 'lobby';
+function updateZone() {
+  const z = zoneAt(player.x, player.z);
+  if (z === currentZone) return;
+  const prev = currentZone;
+  currentZone = z;
+  $('#zone').textContent = ZONES[z];
+  onZoneChange(z, prev);
+}
+function onZoneChange(zone, prev) { }
+
+// 형광등 깜빡임, 촛불, 빛기둥 같은 분위기 애니메이션
+function updateAmbient(dt, now) {
+  updateFlicker(dt, now);
+  for (const c of candles) c.scale.set(1 + Math.sin(now * .013 + c.id) * .15, 1.6 + Math.sin(now * .021 + c.id) * .3, 1);
+  for (const b of beams) b.material.opacity = .08 + Math.sin(now * .002 + b.userData.phase) * .02;
 }
 
 // 조명
@@ -461,7 +831,9 @@ const clock = new THREE.Clock();
 let fpsAcc = 0, fpsFrames = 0;
 function tick() {
   const dt = Math.min(clock.getDelta(), 0.05);
-  if (started) updatePlayer(dt);
+  const now = performance.now();
+  if (started) { updatePlayer(dt); updateZone(); }
+  updateAmbient(dt, now);
   // 프레임이 부족하면 해상도를 조금씩 낮춘다 (모바일 30fps 목표)
   fpsAcc += dt; fpsFrames++;
   if (fpsAcc > 2) {
@@ -479,6 +851,9 @@ function tick() {
 async function boot() {
   await ensureFonts('실패박물관FAILUREMUSEUM이곳의모든전시품은한때의욕이있었습니다.');
   buildLobby();
+  buildMorgue();
+  buildStairsAndFame();
+  buildHall(Array.from({ length: 10 }, (_, i) => ({ id: 'tmp' + i, title: `전시 준비 중 ${i + 1}` })));
   setLook(0, -0.05);
   camera.position.set(player.x, player.eye, player.z);
   renderer.setAnimationLoop(tick);
@@ -486,6 +861,9 @@ async function boot() {
   $('#loading').classList.add('done');
   $('#intro').hidden = false;
 }
+// 콘솔 디버깅용 (예: FM.tp(25, 7, -Math.PI/2))
+window.FM = { player, tp(x, z, yaw = 0, pitch = 0) { player.x = x; player.z = z; setLook(yaw, pitch); } };
+
 $('#btnEnter').addEventListener('click', () => {
   $('#intro').hidden = true;
   $('#hud').hidden = false;
