@@ -136,6 +136,7 @@ if (isTouch) document.body.classList.add('touch');
 const FONT_SERIF = '"Gowun Batang", "AppleMyungjo", "Nanum Myeongjo", serif';
 const FONT_SANS = '"Noto Sans KR", "Apple SD Gothic Neo", "Malgun Gothic", sans-serif';
 
+function exhibitText(list) { return list.map(e => e.title + e.cause + e.age + e.relic + e.epitaph).join(''); }
 // 한글 웹폰트는 unicode-range 조각으로 받기 때문에, 캔버스에 그릴 글자를 미리 로드해 둔다.
 async function ensureFonts(text) {
   const t = text + '0123456789가나다';
@@ -317,6 +318,7 @@ const M = {
 
 function disposeGroup(g) {
   g.traverse(o => {
+    o.userData.dead = true;
     if (o.material && o.material.userData && o.material.userData.own) {
       if (o.material.map) o.material.map.dispose();
       o.material.dispose();
@@ -646,22 +648,6 @@ function makeCase(ex, x, z, parent) {
   addCollider(colliderTarget, x, z, 1.2, 1.2);
   return g;
 }
-// 3단계에서 사망 원인별 오브젝트로 교체
-function makeExhibitObject(ex) {
-  const g = new THREE.Group();
-  box(.4, .4, .4, mat(0xd9a441), 0, .3, 0, g);
-  return g;
-}
-function makePlacard(ex) {
-  const p = textPanel(.9, .42, (c, W, H) => {
-    c.fillStyle = '#f2ecd8'; c.fillRect(0, 0, W, H);
-    c.fillStyle = '#222'; c.textAlign = 'center'; c.textBaseline = 'middle';
-    c.font = `700 ${H * .2}px ${FONT_SERIF}`; c.fillText(ex.title, W / 2, H / 2);
-  }, 400);
-  p.material.userData.own = true;
-  return p;
-}
-
 // ---------- 구역 판정 ----------
 const ZONES = { lobby: '입구 로비', hall: '메인홀 · 일반 전시관', morgue: '신규 안치실', stairs: '전당 가는 계단', fame: '불멸의 흑역사관' };
 function zoneAt(x, z) {
@@ -687,7 +673,329 @@ function updateAmbient(dt, now) {
   updateFlicker(dt, now);
   for (const c of candles) c.scale.set(1 + Math.sin(now * .013 + c.id) * .15, 1.6 + Math.sin(now * .021 + c.id) * .3, 1);
   for (const b of beams) b.material.opacity = .08 + Math.sin(now * .002 + b.userData.phase) * .02;
+  const t = now / 1000;
+  for (let i = animated.length - 1; i >= 0; i--) {
+    const o = animated[i];
+    if (o.userData.dead) { animated.splice(i, 1); continue; }
+    o.userData.tick(t);
+  }
+  if (currentZone === 'fame' || currentZone === 'stairs') updateConfetti(dt, t);
 }
+
+// ================================================================
+//  전시품 데이터 (시드)
+// ================================================================
+const CAUSES = ['귀찮음', '마감', '의욕 증발', '팀원 잠수', '알고 보니 이미 있던 서비스', '그냥 잠'];
+const SEEDS = [
+  { id: 'seed-01', title: '3일 만에 끝난 새벽 5시 기상 프로젝트', cause: '그냥 잠', age: '3일', relic: '결제한 알람 앱 프리미엄 (연간)', epitaph: '알람은 끝까지 울렸다', empathy: 140, createdAt: '2026-08-02T05:00:00Z' },
+  { id: 'seed-02', title: '올해의 다이어트', cause: '의욕 증발', age: '11시간', relic: '치킨 영수증', epitaph: '내일의 나에게 모든 것을 맡긴다', empathy: 127, createdAt: '2026-08-04T12:00:00Z' },
+  { id: 'seed-03', title: '헬스장 1년 회원권', cause: '귀찮음', age: '출석 3회', relic: '샤워만 하고 찍은 출석 도장', epitaph: '기부 천사로 기억되리', empathy: 109, createdAt: '2026-08-06T19:30:00Z' },
+  { id: 'seed-04', title: '팀플 자료조사', cause: '팀원 잠수', age: '2주', relic: '아무도 안 연 공유 폴더', epitaph: '읽씹은 죽음의 첫 단계', empathy: 96, createdAt: '2026-08-09T23:10:00Z' },
+  { id: 'seed-05', title: '하루 영어 단어 30개 외우기', cause: '귀찮음', age: '4일', relic: '첫 장만 새까만 단어장', epitaph: 'abandon까지는 외웠다', empathy: 88, createdAt: '2026-08-11T08:00:00Z' },
+  { id: 'seed-06', title: '나만의 투두 앱 만들기', cause: '알고 보니 이미 있던 서비스', age: '6주', relic: '로고만 완성된 디자인 파일', epitaph: '세상엔 이미 투두 앱이 4만 개 있었다', empathy: 74, createdAt: '2026-08-14T02:40:00Z' },
+  { id: 'seed-07', title: '반려식물 SNS 창업', cause: '알고 보니 이미 있던 서비스', age: '2일', relic: '1년치 결제한 도메인', epitaph: '검색 한 번이면 됐는데', empathy: 67, createdAt: '2026-08-17T15:00:00Z' },
+  { id: 'seed-08', title: '배달앱 없이 한 달 살기', cause: '의욕 증발', age: '1일', relic: '지웠다가 3초 만에 재설치한 앱', epitaph: '재설치는 생각보다 빨랐다', empathy: 61, createdAt: '2026-08-20T21:00:00Z' },
+  { id: 'seed-09', title: '기타 독학', cause: 'F코드', age: '5일', relic: 'C코드만 칠 줄 아는 손가락', epitaph: 'F코드 앞에서 조용히 눈을 감다', empathy: 58, createdAt: '2026-08-23T17:20:00Z' },
+  { id: 'seed-10', title: '블로그 1일 1포스팅', cause: '마감', age: '9일', relic: '"첫 글입니다" 임시저장 17개', epitaph: '첫 글만 17번 썼다', empathy: 52, createdAt: '2026-08-26T10:00:00Z' },
+  { id: 'seed-11', title: '졸업작품 기획서', cause: '마감', age: '한 학기', relic: '최종_진짜최종_이거진짜.pptx', epitaph: '마감은 언제나 어제였다', empathy: 45, createdAt: '2026-08-29T03:30:00Z' },
+  { id: 'seed-12', title: '주말 알고리즘 스터디', cause: '팀원 잠수', age: '2회차', relic: '공지만 남은 단톡방', epitaph: '"다음 주에 봬요"가 유언이 되었다', empathy: 33, createdAt: '2026-09-02T20:00:00Z' },
+  { id: 'seed-13', title: '매일 일기 쓰기', cause: '그냥 잠', age: '3쪽', relic: '1월 1일부터 3일까지만 쓴 다이어리', epitaph: '오늘은 피곤하니 내일 쓴다', empathy: 20, createdAt: '2026-09-08T23:50:00Z' },
+  { id: 'seed-14', title: '경제 뉴스 매일 읽기', cause: '의욕 증발', age: '1주', relic: '구독만 한 채널 12개', epitaph: '알림 설정만큼은 완벽했다', empathy: 12, createdAt: '2026-09-15T07:00:00Z' },
+  { id: 'seed-15', title: '미라클 모닝 명상', cause: '그냥 잠', age: '7분', relic: '"잠들기 좋은 빗소리" 재생 기록', epitaph: '명상하다 진짜로 명을 달리함', empathy: 3, createdAt: '2026-09-21T06:07:00Z' },
+];
+
+// ================================================================
+//  사망 원인별 전시 오브젝트 (진열장 안 약 0.9m 정육면체에 들어가는 크기)
+// ================================================================
+const animated = [];
+const SKIN = mat(0xf1c9a5), HAIR = mat(0x2a2030);
+const zTex = canvasTexture(128, 128, (c, W, H) => {
+  c.fillStyle = '#bcd4ff'; c.font = `700 ${H * .8}px ${FONT_SANS}`; c.textAlign = 'center'; c.textBaseline = 'middle';
+  c.fillText('Z', W / 2, H / 2 + 4);
+});
+const zMat = new THREE.SpriteMaterial({ map: zTex, transparent: true, depthWrite: false });
+const qTex = canvasTexture(128, 128, (c, W, H) => {
+  c.fillStyle = '#e8b84a'; c.fillRect(0, 0, W, H);
+  c.strokeStyle = '#6b4a10'; c.lineWidth = 8; c.strokeRect(4, 4, W - 8, H - 8);
+  c.fillStyle = '#3a2410'; c.font = `700 ${H * .7}px ${FONT_SANS}`; c.textAlign = 'center'; c.textBaseline = 'middle';
+  c.fillText('?', W / 2, H / 2 + 5);
+});
+const qMat = new THREE.MeshLambertMaterial({ map: qTex });
+
+function causeKind(cause) { return CAUSES.includes(cause) ? cause : '기타'; }
+function makeExhibitObject(ex) {
+  const g = new THREE.Group();
+  OBJECT_BUILDERS[causeKind(ex.cause)](g);
+  return g;
+}
+function animate(o, fn) { o.userData.tick = fn; animated.push(o); return o; }
+function chair(parent, x, rotY, tipped = 0) {
+  const c = new THREE.Group(); c.position.set(x, 0, 0); c.rotation.set(0, rotY, tipped); parent.add(c);
+  const wood = mat(0x9b6a3f);
+  box(.26, .04, .26, wood, 0, .24, 0, c);
+  box(.26, .3, .04, wood, 0, .41, -.11, c);
+  for (const [dx, dz] of [[-.11, -.11], [.11, -.11], [-.11, .11], [.11, .11]]) box(.03, .24, .03, wood, dx, .12, dz, c);
+  return c;
+}
+function giftBox(parent, x) {
+  const b = new THREE.Group(); b.position.x = x; parent.add(b);
+  box(.3, .3, .3, mat(0xd9655a), 0, .15, 0, b);
+  box(.31, .31, .05, M.gold, 0, .15, 0, b);
+  box(.05, .31, .31, M.gold, 0, .15, 0, b);
+  for (const s of [-1, 1]) mesh(geo('sphere', .06, 6, 4), M.gold, s * .05, .33, 0, b).scale.set(1.3, .8, .8);
+  return b;
+}
+const OBJECT_BUILDERS = {
+  '귀찮음'(g) { // 이불 덩어리 (안에 사람 있음)
+    const blanket = mat(0x6f9fd8), stripe = mat(0xf2d16b);
+    const b = mesh(geo('cap', .19, .42, 4, 10), blanket, .05, .19, 0, g); b.rotation.z = Math.PI / 2; b.scale.z = 1.25;
+    for (const x of [-.08, .22]) { const s = mesh(geo('cyl', .195, .195, .05, 10), stripe, x, .19, 0, g); s.rotation.z = Math.PI / 2; s.scale.z = 1.25; }
+    box(.26, .1, .34, M.white, -.38, .05, 0, g);
+    mesh(geo('sphere', .14, 10, 8), SKIN, -.36, .22, 0, g);
+    mesh(geo('sphere', .145, 10, 6, 0, Math.PI * 2, 0, Math.PI / 2), HAIR, -.38, .24, 0, g).rotation.z = .6;
+    for (const z of [-.05, .05]) box(.01, .01, .04, M.black, -.3, .22, z, g).rotation.x = .2;
+    for (const z of [-.07, .07]) mesh(geo('sphere', .06, 6, 4), mat(0xe05a5a), .42, .06, z, g);   // 양말
+    animate(b, t => { b.scale.y = 1 + Math.sin(t * 1.6) * .05; });  // 숨쉬기
+  },
+  '마감'(g) { // 부서진 시계
+    const c = new THREE.Group(); c.position.set(0, .34, 0); c.rotation.z = .32; g.add(c);
+    const rim = mesh(geo('cyl', .3, .3, .07, 16), mat(0xb3242f), 0, 0, -.02, c); rim.rotation.x = Math.PI / 2;
+    const face = mesh(geo('cyl', .26, .26, .075, 16), M.white, 0, 0, 0, c); face.rotation.x = Math.PI / 2;
+    for (const x of [-.13, .13]) mesh(geo('sphere', .08, 8, 6, 0, Math.PI * 2, 0, Math.PI / 2), M.gold, x, .3, 0, c);
+    const hourP = new THREE.Group(); hourP.position.z = .045; hourP.rotation.z = -2.2; c.add(hourP);
+    box(.035, .14, .02, M.black, 0, .07, 0, hourP);
+    const pivot = new THREE.Group(); pivot.position.z = .055; c.add(pivot);
+    box(.025, .21, .02, M.black, 0, .105, 0, pivot);
+    box(.3, .012, .01, M.black, .02, -.04, .045, c).rotation.z = -.6;   // 금
+    box(.012, .16, .01, M.black, -.08, .05, .045, c).rotation.z = .3;
+    for (const x of [-.18, .18]) box(.04, .14, .04, M.black, x * .9, -.3, 0, c).rotation.z = x > 0 ? -.4 : .4;
+    box(.12, .02, .09, M.white, .33, .01, .18, g).rotation.y = .7;       // 떨어진 조각
+    const spring = mesh(geo('cyl', .025, .025, .12, 6), M.gold, -.3, .02, .2, g); spring.rotation.z = Math.PI / 2;
+    animate(pivot, t => { pivot.rotation.z = -(Math.floor(t * 1.5) % 3) * .15 + Math.sin(t * 40) * .02; });  // 같은 자리에서 멈칫멈칫
+  },
+  '의욕 증발'(g) { // 1% 배터리 + 증발하는 의욕
+    box(.3, .5, .2, mat(0x2d2d35), 0, .25, 0, g);
+    box(.12, .05, .1, mat(0x2d2d35), 0, .525, 0, g);
+    box(.24, .06, .205, new THREE.MeshBasicMaterial({ color: 0xff3b30 }), 0, .06, 0, g);
+    box(.25, .43, .01, mat(0x44444f), 0, .25, .1, g);
+    const steamMat = mat(0xe8e6ff);
+    for (let i = 0; i < 5; i++) {
+      const s = mesh(geo('sphere', .05, 6, 4), steamMat, 0, .6, 0, g);
+      const off = i / 5;
+      animate(s, t => {
+        const k = (t * .35 + off) % 1;
+        s.position.set(Math.sin((k + off) * 9) * .08, .58 + k * .38, Math.cos(k * 7 + i) * .05);
+        s.scale.setScalar((1 - k) * 1.2 + .1);
+      });
+    }
+  },
+  '팀원 잠수'(g) { // 빈 의자 2개
+    chair(g, -.2, .15);
+    chair(g, .2, -.2);
+    box(.07, .01, .12, M.black, -.2, .265, .02, g).rotation.y = .4;  // 두고 간 폰 (읽음 1)
+    box(.28, .02, .12, mat(0xcfd6e6), 0, .02, .25, g).rotation.y = -.2; // 떨어진 명찰
+  },
+  '알고 보니 이미 있던 서비스'(g) { // 똑같은 상자 두 개
+    giftBox(g, -.19);
+    giftBox(g, .19);
+  },
+  '그냥 잠'(g) { // Zzz 떠 있는 베개
+    const p = mesh(geo('sphere', .22, 10, 6), M.white, 0, .09, 0, g); p.scale.set(1.5, .42, 1);
+    mesh(geo('sphere', .1, 8, 6), mat(0xdcdcdc), 0, .14, 0, g).scale.set(1.4, .25, 1);
+    for (let i = 0; i < 3; i++) {
+      const z = new THREE.Sprite(zMat); g.add(z);
+      animate(z, t => {
+        const k = (t * .3 + i / 3) % 1;
+        z.position.set(.1 + k * .2, .25 + k * .5, 0);
+        z.scale.setScalar(.1 + k * .14);
+        z.material.rotation = .3;
+      });
+    }
+  },
+  '기타'(g) { // 물음표 상자
+    const b = box(.36, .36, .36, qMat, 0, .3, 0, g);
+    animate(b, t => { b.rotation.y = t * .6; b.position.y = .3 + Math.sin(t * 2) * .05; });
+  },
+};
+
+// ================================================================
+//  명패 / 영정 / 전당 명패 그리기
+// ================================================================
+function drawPlacard(c, W, H, ex) {
+  c.fillStyle = '#f2ecd8'; c.fillRect(0, 0, W, H);
+  c.strokeStyle = '#1b1a22'; c.lineWidth = H * .025; c.strokeRect(H * .05, H * .05, W - H * .1, H - H * .1);
+  c.fillStyle = '#111'; c.beginPath(); c.moveTo(0, 0); c.lineTo(H * .3, 0); c.lineTo(0, H * .3); c.fill();
+  c.fillStyle = '#1b1a22'; c.textAlign = 'center'; c.textBaseline = 'middle';
+  c.font = `700 ${H * .135}px ${FONT_SERIF}`;
+  const lines = wrapLines(c, ex.title, W * .82, 2);
+  lines.forEach((l, i) => c.fillText(l, W / 2, lines.length > 1 ? H * (.22 + i * .16) : H * .27));
+  c.font = `400 ${H * .09}px ${FONT_SERIF}`; c.fillStyle = '#3a3440';
+  c.fillText(`향년 ${ex.age}  ·  사인: ${ex.cause}`, W / 2, H * .6, W * .88);
+  c.fillStyle = '#6b5f6f'; c.font = `400 ${H * .078}px ${FONT_SERIF}`;
+  c.fillText(`유품: ${ex.relic}`, W / 2, H * .75, W * .88);
+  c.fillStyle = '#b3242f'; c.font = `700 ${H * .075}px ${FONT_SANS}`;
+  c.fillText(`ㅠㅠ 공감 ${ex.empathy}`, W / 2, H * .88);
+}
+function makePlacard(ex) {
+  const p = textPanel(.9, .42, (c, W, H) => drawPlacard(c, W, H, ex), 720);
+  p.material.userData.own = true;
+  return p;
+}
+function drawPortrait(c, W, H, ex) {
+  const grd = c.createLinearGradient(0, 0, 0, H); grd.addColorStop(0, '#d8d6d2'); grd.addColorStop(1, '#8e8b86');
+  c.fillStyle = grd; c.fillRect(0, 0, W, H);
+  c.fillStyle = '#4a4744';
+  c.beginPath(); c.arc(W / 2, H * .33, W * .16, 0, Math.PI * 2); c.fill();
+  c.beginPath(); c.ellipse(W / 2, H * .66, W * .3, H * .17, 0, Math.PI, 0); c.fill();
+  c.fillStyle = '#f5f3ee'; c.fillRect(0, H * .7, W, H * .3);
+  c.fillStyle = '#1b1a22'; c.textAlign = 'center'; c.textBaseline = 'middle';
+  c.font = `700 ${H * .075}px ${FONT_SERIF}`;
+  const lines = wrapLines(c, '故 ' + ex.title, W * .9, 2);
+  lines.forEach((l, i) => c.fillText(l, W / 2, H * (lines.length > 1 ? .78 + i * .1 : .83)));
+  c.font = `400 ${H * .045}px ${FONT_SERIF}`; c.fillStyle = '#555';
+  c.fillText(`향년 ${ex.age}`, W / 2, H * .955, W * .9);
+}
+function drawFamePlaque(c, W, H, ex, rank) {
+  const grd = c.createLinearGradient(0, 0, W, H); grd.addColorStop(0, '#f7dc8a'); grd.addColorStop(.5, '#d9a93c'); grd.addColorStop(1, '#f2cd6a');
+  c.fillStyle = grd; c.fillRect(0, 0, W, H);
+  c.strokeStyle = '#6b4510'; c.lineWidth = H * .03; c.strokeRect(H * .05, H * .05, W - H * .1, H - H * .1);
+  c.fillStyle = '#3a220a'; c.textAlign = 'center'; c.textBaseline = 'middle';
+  c.font = `700 ${H * .1}px ${FONT_SERIF}`; c.fillText(`제 ${rank + 1} 위`, W / 2, H * .17);
+  c.font = `700 ${H * .12}px ${FONT_SERIF}`;
+  const lines = wrapLines(c, `故「${ex.title}」`, W * .86, 2);
+  lines.forEach((l, i) => c.fillText(l, W / 2, H * (lines.length > 1 ? .34 + i * .14 : .4)));
+  c.font = `700 ${H * .1}px ${FONT_SERIF}`; c.fillText('명예 실패자', W / 2, H * .64);
+  c.font = `400 ${H * .085}px ${FONT_SERIF}`; c.fillText(`공감 ${ex.empathy}명 인증`, W / 2, H * .82);
+  // 인증 도장
+  c.save(); c.translate(W * .84, H * .8); c.rotate(-.25);
+  c.strokeStyle = '#b3242f'; c.lineWidth = H * .02; c.beginPath(); c.arc(0, 0, H * .1, 0, Math.PI * 2); c.stroke();
+  c.fillStyle = '#b3242f'; c.font = `700 ${H * .065}px ${FONT_SERIF}`; c.fillText('인증', 0, 1);
+  c.restore();
+}
+
+// ================================================================
+//  배치: 전당 상위 5 / 안치실 최신 3 / 나머지 메인홀
+// ================================================================
+let exhibits = [];
+const anchors = new Map();         // 전시품 id → 말풍선/이모지 기준 위치
+let morgueDyn = null, fameDyn = null;
+const byRank = (a, b) => b.empathy - a.empathy || Date.parse(a.createdAt) - Date.parse(b.createdAt);
+const byNewest = (a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt);
+function topFive(list) { return [...list].sort(byRank).slice(0, 5); }
+
+function layoutAll() {
+  anchors.clear();
+  const fame = topFive(exhibits);
+  const fameIds = new Set(fame.map(e => e.id));
+  const rest = exhibits.filter(e => !fameIds.has(e.id)).sort(byNewest);
+  buildFameExhibits(fame);
+  buildMorgueExhibits(rest.slice(0, COFFIN_SLOTS.length));
+  buildHall(rest.slice(COFFIN_SLOTS.length));
+}
+
+function buildMorgueExhibits(list) {
+  if (morgueDyn) disposeGroup(morgueDyn);
+  morgueDyn = new THREE.Group(); world.add(morgueDyn);
+  COFFIN_SLOTS.forEach(([x, z], i) => {
+    const ex = list[i];
+    if (!ex) {
+      const s = signBoard('자리 있음 · 당신의 실패를 기다립니다', 1.9, .3, { size: .4, border: '#777' });
+      s.position.set(x, 1.1, z); s.rotation.x = -Math.PI / 2; s.rotation.z = Math.PI / 2; morgueDyn.add(s);
+      return;
+    }
+    const obj = makeExhibitObject(ex); obj.position.set(x + .15, 1.08, z); obj.rotation.y = Math.PI / 2 + rand(-.3, .3); morgueDyn.add(obj);
+    const fr = new THREE.Group(); fr.position.set(x - 1.35, 0, z); fr.rotation.y = Math.PI / 2; morgueDyn.add(fr);
+    box(.05, 1.2, .05, M.black, 0, .6, -.12, fr).rotation.x = -.12;
+    box(.74, .92, .05, M.black, 0, 1.55, 0, fr);
+    const pic = textPanel(.62, .8, (c, W, H) => drawPortrait(c, W, H, ex), 420);
+    pic.material.userData.own = true; pic.position.set(0, 1.55, .03); fr.add(pic);
+    for (const s of [-1, 1]) box(.05, .34, .012, M.black, s * .25, 1.9, .035, fr).rotation.z = s * .8;   // 검은 리본
+    const hit = box(2.9, 2.4, 1.3, M.hit, x - .3, 1.2, z, morgueDyn); hit.userData.exhibit = ex;
+    anchors.set(ex.id, new THREE.Vector3(x + .15, 1.9, z));
+  });
+}
+
+function makeFallenStatue(rank) {
+  const g = new THREE.Group();
+  g.scale.setScalar([1.75, 1.6, 1.5, 1.4, 1.35][rank]);
+  const G = mat(0xffc93c, { emissive: 0x5a3800 });
+  const cap = (r, l, x, y, z, rz = 0, ry = 0, rx = 0) => { const m = mesh(geo('cap', r, l, 3, 8), G, x, y, z, g); m.rotation.set(rx, ry, rz); return m; };
+  if (rank % 2 === 0) {
+    // 얼굴부터 넘어짐: 엉덩이는 하늘로, 한쪽 다리는 번쩍
+    cap(.2, .42, 0, .3, 0, Math.PI / 2 - .5);
+    mesh(geo('sphere', .18, 10, 8), G, -.45, .16, 0, g);
+    cap(.065, .34, -.62, .08, .24, Math.PI / 2, .5);
+    cap(.065, .34, -.62, .08, -.24, Math.PI / 2, -.5);
+    cap(.075, .4, .36, .52, .1, -.9);
+    cap(.075, .4, .42, .2, -.14, .5);
+  } else {
+    // 대자로 뻗음
+    cap(.2, .42, 0, .2, 0, Math.PI / 2);
+    mesh(geo('sphere', .18, 10, 8), G, -.52, .2, 0, g);
+    cap(.065, .36, -.28, .1, .38, Math.PI / 2, 1.1);
+    cap(.065, .36, -.28, .1, -.38, Math.PI / 2, -1.1);
+    cap(.075, .42, .5, .09, .2, Math.PI / 2, -.35);
+    cap(.075, .42, .5, .09, -.2, Math.PI / 2, .35);
+  }
+  // 바나나 껍질 (사인 추정)
+  const peel = mat(0xfff06a, { emissive: 0x3a3000 });
+  for (let i = 0; i < 3; i++) { const p = mesh(geo('sphere', .08, 6, 4), peel, .75 + Math.cos(i * 2.1) * .06, .03, .35 + Math.sin(i * 2.1) * .06, g); p.scale.set(1.6, .25, .6); p.rotation.y = i * 2.1; }
+  if (rank === 0) { // 떨어진 왕관
+    const crown = mesh(geo('cyl', .12, .1, .1, 8, 1, true), G, -.7, .1, -.28, g); crown.rotation.z = 1.2;
+    crown.material = mat(0xffc93c, { emissive: 0x5a3800, side: THREE.DoubleSide });
+  }
+  g.rotation.y = Math.PI / 2 + rand(-.35, .35);   // 입구에서 옆모습이 보이도록
+  return g;
+}
+
+function buildFameExhibits(list) {
+  if (fameDyn) disposeGroup(fameDyn);
+  fameDyn = new THREE.Group(); world.add(fameDyn);
+  dynamicColliders = dynamicColliders.filter(c => c.tag !== 'fame');
+  list.forEach((ex, i) => {
+    const pos = fameStatuePos(i);
+    const st = makeFallenStatue(i); st.position.copy(pos); fameDyn.add(st);
+    const [z] = PODIUMS[i];
+    const stand = new THREE.Group(); stand.position.set(PODIUM_X - 1.6, FAME_Y, z + .75); stand.rotation.y = -Math.PI / 2; fameDyn.add(stand);
+    box(.08, .7, .08, M.gold, 0, .35, 0, stand);
+    box(.4, .04, .3, M.gold, 0, .02, 0, stand);
+    const pl = textPanel(.95, .56, (c, W, H) => drawFamePlaque(c, W, H, ex, i), 620);
+    pl.material.userData.own = true; pl.position.set(0, .86, .06); pl.rotation.x = -.45; stand.add(pl);
+    colliderTag = 'fame'; addCollider(dynamicColliders, PODIUM_X - 1.6, z + .75, .35, .35); colliderTag = null;
+    const hit = box(2.9, 3.4, 2.4, M.hit, PODIUM_X - .6, FAME_Y + 1.7, z, fameDyn); hit.userData.exhibit = ex;
+    anchors.set(ex.id, pos.clone().add(new THREE.Vector3(0, 1.1, 0)));
+  });
+}
+
+// ================================================================
+//  전당 색종이 (InstancedMesh 한 번의 draw call)
+// ================================================================
+const CONFETTI_N = isTouch ? 90 : 170;
+const confetti = new THREE.InstancedMesh(geo('plane', .09, .06), new THREE.MeshBasicMaterial({ side: THREE.DoubleSide }), CONFETTI_N);
+confetti.frustumCulled = false;
+const cf = Array.from({ length: CONFETTI_N }, () => ({
+  x: rand(18, 32), y: rand(FAME_Y, FAME_Y + 7), z: rand(-2, 16), vy: rand(.35, .8), sp: rand(1, 4), ph: rand(0, 6), boost: 0,
+}));
+{
+  const cols = [0xffd24a, 0xff4d5e, 0xffffff, 0xff9ad5, 0x6fe3ff, 0x9dff7a].map(c => new THREE.Color(c));
+  cf.forEach((_, i) => confetti.setColorAt(i, pick(cols)));
+  scene.add(confetti);
+}
+const _m4 = new THREE.Matrix4(), _q = new THREE.Quaternion(), _e = new THREE.Euler(), _p = new THREE.Vector3(), _s = new THREE.Vector3(1, 1, 1);
+function updateConfetti(dt, t) {
+  for (let i = 0; i < CONFETTI_N; i++) {
+    const p = cf[i];
+    p.y -= (p.vy + p.boost) * dt;
+    p.boost *= .97;
+    p.x += Math.sin(t * .8 + p.ph) * dt * .3;
+    if (p.y < FAME_Y + .02) { p.y = FAME_Y + 6.9; p.x = rand(18, 32); p.z = rand(-2, 16); }
+    _e.set(t * p.sp + p.ph, t * p.sp * .7, p.ph);
+    _m4.compose(_p.set(p.x, p.y, p.z), _q.setFromEuler(_e), _s);
+    confetti.setMatrixAt(i, _m4);
+  }
+  confetti.instanceMatrix.needsUpdate = true;
+}
+function confettiBurst() { cf.forEach(p => { p.y = rand(FAME_Y + 4, FAME_Y + 7); p.boost = rand(0, 1.5); }); }
 
 // 조명
 scene.add(new THREE.HemisphereLight(0xb8b4ff, 0x2a2140, 2.2));
@@ -849,11 +1157,12 @@ function tick() {
 //  시작
 // ================================================================
 async function boot() {
-  await ensureFonts('실패박물관FAILUREMUSEUM이곳의모든전시품은한때의욕이있었습니다.');
+  exhibits = SEEDS.map(e => ({ ...e }));
+  await ensureFonts(document.querySelector('script[type=module]').textContent + exhibitText(exhibits));
   buildLobby();
   buildMorgue();
   buildStairsAndFame();
-  buildHall(Array.from({ length: 10 }, (_, i) => ({ id: 'tmp' + i, title: `전시 준비 중 ${i + 1}` })));
+  layoutAll();
   setLook(0, -0.05);
   camera.position.set(player.x, player.eye, player.z);
   renderer.setAnimationLoop(tick);
