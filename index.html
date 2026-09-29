@@ -128,6 +128,32 @@
   #btnLook[hidden] { display: none; }
   .emo span { display: inline-block; font-family: var(--sans); font-weight: 700; font-size: 22px; color: #fff; white-space: nowrap; text-shadow: 0 2px 6px #000, 0 0 14px #ff5a7a; animation: emo 1.9s ease-out forwards; }
   @keyframes emo { 0% { transform: translateY(0) scale(.5); opacity: 0; } 15% { opacity: 1; transform: translateY(-12px) scale(1.2); } 100% { transform: translateY(-120px) scale(1); opacity: 0; } }
+
+  /* 로컬 모드 배너 / 연결 상태 점 */
+  #modeBanner { position: fixed; top: 0; left: 0; right: 0; z-index: 45; background: #ffcf3f; color: #1b1a22; font: 700 13px var(--sans); text-align: center; padding: max(6px, env(safe-area-inset-top)) 12px 6px; box-shadow: 0 2px 10px rgba(0,0,0,.4); }
+  #modeBanner[hidden] { display: none; }
+  body.has-banner #hud { top: 30px; }
+  #connDot { width: 40px; height: 40px; min-width: 40px; padding: 0; display: grid; place-items: center; }
+  #connDot::before { content: ""; width: 12px; height: 12px; border-radius: 50%; background: #888; box-shadow: 0 0 0 2px rgba(0,0,0,.5); }
+  #connDot.realtime::before { background: #35d06a; animation: live 2s infinite; }
+  #connDot.polling::before { background: #f4c430; }
+  #connDot.offline::before { background: #e5484d; }
+  @keyframes live { 50% { box-shadow: 0 0 0 2px rgba(0,0,0,.5), 0 0 0 6px rgba(53,208,106,.25); } }
+  /* 사진 첨부 / 상세 사진 / 크게 보기 */
+  .photo-field { border: 1px dashed #1b1a22; padding: 10px 10px 4px; margin-bottom: 10px; text-align: left; }
+  .photo-field label { margin-bottom: 6px; }
+  .form input[type=file] { font-size: 14px; padding: 8px; font-family: var(--sans); }
+  #photoPreview { text-align: center; }
+  #photoPreview[hidden] { display: none; }
+  #photoPreview img { display: block; max-width: 100%; max-height: 170px; margin: 4px auto 0; border: 6px solid #3b2416; transform: rotate(-1.5deg); }
+  #photoPreview .btn-ghost { width: auto; padding: 6px 14px; margin: 8px 0 4px; }
+  .photo-msg { font: 12px var(--sans); color: #555; margin: 4px 0 6px; min-height: 16px; }
+  .photo-msg.bad { color: #b3242f; }
+  #dPhoto { display: block; width: 100%; max-height: 260px; object-fit: contain; background: #2a2638; margin: 0 0 14px; border: 8px solid #3b2416; cursor: zoom-in; }
+  #dPhoto[hidden] { display: none; }
+  #lightbox { position: fixed; inset: 0; z-index: 60; background: rgba(0,0,0,.92); display: grid; place-items: center; cursor: zoom-out; padding: 12px; }
+  #lightbox[hidden] { display: none; }
+  #lightbox img { max-width: 100%; max-height: 100%; object-fit: contain; }
 </style>
 <script type="importmap">
 { "imports": {
@@ -137,6 +163,7 @@
 </script>
 </head>
 <body>
+<div id="modeBanner" hidden>⚠ 로컬 모드: 다른 방문자와 공유되지 않습니다</div>
 <div id="loading"><div class="candle"></div><p>고인의 뜻을 기리는 중...</p></div>
 
 <div id="intro" hidden>
@@ -149,11 +176,11 @@
     <div class="keys">
       <span class="only-desk"><b>W A S D</b><span>걷기 (Shift: 서둘러 조문)</span></span>
       <span class="only-desk"><b>마우스</b><span>둘러보기 (클릭하면 시점 고정, Esc 해제)</span></span>
-      <span class="only-desk"><b>클릭 / E</b><span>전시품 자세히 보기</span></span>
+      <span class="only-desk"><b>클릭 / E</b><span>액자 자세히 보기</span></span>
       <span class="only-touch"><b>왼쪽 드래그</b><span>걷기</span></span>
       <span class="only-touch"><b>오른쪽 드래그</b><span>둘러보기</span></span>
-      <span class="only-touch"><b>전시품 탭</b><span>자세히 보기</span></span>
-      <b>우측 상단</b><span>내 실패 전시하기 · 음소거 · 도움말</span>
+      <span class="only-touch"><b>액자 탭</b><span>자세히 보기</span></span>
+      <b>우측 상단</b><span>연결 상태 점 · 내 실패 전시하기 · 음소거 · 도움말</span>
     </div>
     <button class="btn-solemn" id="btnEnter">조의를 표하고 입장하기</button>
   </div>
@@ -163,6 +190,7 @@
   <div id="crosshair"></div>
   <div id="zone">입구 로비</div>
   <div id="topbar">
+    <button id="connDot" class="offline" title="연결 상태" aria-label="연결 상태"></button>
     <button id="btnRegister">내 실패 전시하기</button>
     <button id="btnMute" aria-label="음소거">🔊</button>
     <button id="btnHelp" title="도움말" aria-label="도움말">?</button>
@@ -179,6 +207,7 @@
   <button class="x" data-close aria-label="닫기">✕</button>
   <div class="kick" id="dKicker"></div>
   <h2 id="dTitle"></h2>
+  <img id="dPhoto" alt="첨부 사진 (누르면 크게 보기)" hidden>
   <dl>
     <dt>향년</dt><dd id="dAge"></dd>
     <dt>사망 원인</dt><dd id="dCause"></dd>
@@ -210,6 +239,12 @@
       <input name="relic" maxlength="60" placeholder="예: 결제한 알람 앱 프리미엄"></label>
     <label>묘비명 <span class="opt">(선택)</span> <span class="count"></span>
       <input name="epitaph" maxlength="60" placeholder="예: 알람은 끝까지 울렸다"></label>
+    <div class="photo-field">
+      <label>사진 <span class="opt">(선택 · 이미지 파일, 5MB 이하)</span>
+        <input type="file" id="photoInput" name="photo" accept="image/*"></label>
+      <div id="photoPreview" hidden><img alt="첨부한 사진 미리보기"><button type="button" class="btn-ghost" id="btnPhotoClear">사진 지우기</button></div>
+      <p class="photo-msg" id="photoMsg"></p>
+    </div>
     <p class="err" id="regErr"></p>
     <div class="row">
       <button type="button" class="btn-ghost" data-close>그냥 구경만 할게요</button>
@@ -218,10 +253,13 @@
   </form>
 </div>
 
+<div id="lightbox" hidden><img alt="크게 보기"></div>
+
 <script type="module">
 import * as THREE from 'three';
 import { PointerLockControls } from 'three/addons/controls/PointerLockControls.js';
 import { CSS2DRenderer, CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 
 // ================================================================
 //  공통 유틸
@@ -408,8 +446,7 @@ const M = {
   trim: mat(0x0e0c1c), white: mat(0xeeeeee), black: mat(0x16151c), cream: mat(0xf2ecd8),
   wood: mat(0x5b3a26), woodDark: mat(0x3a2418), woodLight: mat(0x8a5a36),
   gold: mat(0xe8b84a, { emissive: 0x4a3000 }),
-  fameWall: mat(0x4a1624), carpet: mat(0xa3202c), pedestal: mat(0x3b3566),
-  glass: new THREE.MeshLambertMaterial({ color: 0xcfe0ff, transparent: true, opacity: 0.16, depthWrite: false }),
+  fameWall: mat(0x4a1624), carpet: mat(0xa3202c),
   tube: new THREE.MeshBasicMaterial({ color: 0xf2f6ff }),
   tubeOff: new THREE.MeshBasicMaterial({ color: 0x4a4d5c }),
   flame: new THREE.MeshBasicMaterial({ color: 0xffc35a }),
@@ -570,79 +607,129 @@ function setVisitorBoard(n) {
   s.position.y = 1.9; visitorBoard.add(s);
 }
 
-// ---------- 메인홀 (동적: 작품 수에 따라 길어짐) ----------
-const HALL = { cols: [-6.3, -2.1, 2.1, 6.3], rowGap: 4.6, firstZ: -4.4, max: 48 };
-let hallGroup = null, hallLen = 20;
-const hallLights = [new THREE.PointLight(0xeef2ff, 14, 20, 1), new THREE.PointLight(0xeef2ff, 14, 20, 1)];
+// ---------- 메인홀 (동적: 작품 수에 따라 길어지고, 9점부터 가운데 칸막이 벽이 생김) ----------
+//  액자는 벽을 따라 한 줄로 이어지는 경로(뱀 모양)에 최신순으로 걸린다.
+//  새 작품이 오면 기존 액자는 같은 벽에서 한 칸씩 밀려나고, 수용량은 4칸 단위로 늘어나 재배치가 드물다.
+const HALL = { gap: 2.5, firstZ: -3.6, max: 90, frameY: 2.15 };
+let hallGroup = null, hallKey = '';
+const hallLights = [new THREE.PointLight(0xeef2ff, 14, 22, 1), new THREE.PointLight(0xeef2ff, 14, 22, 1)];
 hallLights.forEach(l => { l.userData.base = 14; scene.add(l); });
-function buildHall(list) {
+function hallLayout(n) {
+  const spine = n > 8, lines = spine ? 4 : 2;
+  const R = spine ? Math.max(4, 4 * Math.ceil(n / (lines * 4))) : 4;
+  const len = Math.max(20, Math.ceil(-HALL.firstZ + (R - 1) * HALL.gap + 6));
+  return { spine, lines, R, len };
+}
+const HALL_LINES = {
+  2: [[-8.84, Math.PI / 2], [8.84, -Math.PI / 2]],
+  4: [[-8.84, Math.PI / 2], [-.21, -Math.PI / 2], [.21, Math.PI / 2], [8.84, -Math.PI / 2]],
+};
+function hallSlot(i, L) {
+  const line = Math.floor(i / L.R);
+  let pos = i % L.R;
+  if (line % 2) pos = L.R - 1 - pos;
+  const [x, rotY] = HALL_LINES[L.lines][line];
+  return { x, y: HALL.frameY, z: HALL.firstZ - pos * HALL.gap, rotY, line };
+}
+function ensureHallShell(n, museumEmpty, overflow) {
+  const L = hallLayout(n);
+  const key = `${L.len}|${L.spine}|${museumEmpty ? 'E' : n ? 'F' : 'e'}|${overflow}`;
+  if (key === hallKey) return L;
+  hallKey = key;
   if (hallGroup) disposeGroup(hallGroup);
   tubes.splice(0, tubes.length, ...tubes.filter(t => t.parent && !isInHall(t)));
   hallGroup = new THREE.Group(); world.add(hallGroup);
   dynamicColliders = dynamicColliders.filter(c => c.tag !== 'hall');
   colliderTarget = dynamicColliders; colliderTag = 'hall';
-  const shown = list.slice(0, HALL.max);
-  const rows = Math.max(3, Math.ceil(shown.length / HALL.cols.length));
-  hallLen = Math.max(18, 7 + rows * HALL.rowGap);
-  room(hallGroup, { x0: -9, x1: 9, z0: -hallLen, z1: 0, h: 5, wall: M.wall, floor: floorMat(0x423d6e, 9, hallLen / 2), ceil: M.ceil, doors: { s: false } });
-  // 입구 안내판
-  const s = signBoard('최신 실패순 전시 · 만지지 마시오 (이미 망가짐)', 5, .45, { size: .42 });
+  room(hallGroup, { x0: -9, x1: 9, z0: -L.len, z1: 0, h: 5, wall: M.wall, floor: floorMat(0x423d6e, 9, L.len / 2), ceil: M.ceil, doors: { s: false } });
+  const s = signBoard('최신 실패순 전시 · 만지지 마시오 (이미 삐뚤어짐)', 5, .45, { size: .42 });
   s.position.set(0, 3.9, -.17); s.rotation.y = Math.PI; hallGroup.add(s);
-  shown.forEach((ex, i) => {
-    const r = Math.floor(i / HALL.cols.length), c = i % HALL.cols.length;
-    makeCase(ex, HALL.cols[c], HALL.firstZ - r * HALL.rowGap, hallGroup);
-  });
-  // 형광등: 줄마다
-  for (let r = 0; r < rows; r++) {
-    const z = HALL.firstZ - r * HALL.rowGap + 1.6;
-    tube(hallGroup, -4.2, 4.92, z); tube(hallGroup, 4.2, 4.92, z);
+  if (L.spine) {   // 가운데 칸막이 벽 (양면 전시)
+    const z0 = -1.9, z1 = HALL.firstZ - (L.R - 1) * HALL.gap - 1.6;
+    box(.4, 3.6, z0 - z1, M.wallDeep, 0, 1.8, (z0 + z1) / 2, hallGroup);
+    addCollider(dynamicColliders, 0, (z0 + z1) / 2, .4, z0 - z1);
+    const cap = signBoard('← 최신   ·   오래된 실패 →', 1.9, .36, { size: .44 });
+    cap.position.set(0, 2.6, z0 + .01); hallGroup.add(cap);
   }
+  // 막다른 벽 문구 / 빈 박물관 연출
+  const far = -L.len + .17;
+  if (museumEmpty) {
+    const msg = textPanel(7.2, 2.1, (c, W, H) => {
+      c.fillStyle = '#0f0e22'; c.fillRect(0, 0, W, H);
+      c.strokeStyle = '#e0b24a'; c.lineWidth = 8; c.strokeRect(14, 14, W - 28, H - 28);
+      c.fillStyle = '#f3efe2'; c.textAlign = 'center'; c.textBaseline = 'middle';
+      c.font = `700 ${H * .17}px ${FONT_SERIF}`; c.fillText('아직 아무도 실패하지 않았습니다.', W / 2, H * .34);
+      c.fillStyle = '#e0b24a'; c.font = `700 ${H * .15}px ${FONT_SERIF}`; c.fillText('첫 번째 고인이 되어주세요', W / 2, H * .6);
+      c.fillStyle = '#a9a6c2'; c.font = `400 ${H * .075}px ${FONT_SANS}`; c.fillText('우측 상단 「내 실패 전시하기」', W / 2, H * .82);
+    });
+    msg.material.userData.own = true;
+    msg.position.set(0, 2.3, far); hallGroup.add(msg);
+    // 같은 문구를 입구 쪽 벽에도 (멀리서도 보이게)
+    const near = msg.clone(); near.scale.setScalar(.55); near.position.set(-8.83, 3.35, -2.4); near.rotation.y = Math.PI / 2; hallGroup.add(near);
+    const empties = [['비어 있음', '(예약 가능)'], ['공석', '고인 모집 중'], ['비어 있음', '못만 박혀 있음'], ['여기에 당신의 실패를', ''], ['공석', '관장이 닦아 둠'], ['비어 있음', '(진짜로)']];
+    empties.forEach(([t, sub], i) => {
+      const sl = hallSlot(i + 1, { lines: 2, R: 4 });
+      const e = makeEmptyFrame('wood', t, sub);
+      e.position.set(sl.x, sl.y, sl.z); e.rotation.y = sl.rotY; e.children[0].rotation.z = tiltFor('empty' + i) * 1.6;
+      hallGroup.add(e);
+    });
+  } else {
+    const txt = overflow > 0 ? `나머지 ${overflow}점은 지하 수장고에서 숙면 중` : n === 0 ? '메인홀은 아직 비어 있습니다 · 안치실에서 대기 중' : '막다른 길 · 인생처럼';
+    const end = signBoard(txt, 5.2, .5, { size: .4 });
+    end.position.set(0, 2.9, far); hallGroup.add(end);
+  }
+  for (let z = -3; z > -L.len + 1; z -= 4.6) { tube(hallGroup, -4.4, 4.92, z); tube(hallGroup, 4.4, 4.92, z); }
   const hallTubes = tubes.filter(isInHall);
-  hallLights[0].position.set(0, 4.3, -hallLen * .28); hallLights[1].position.set(0, 4.3, -hallLen * .72);
+  hallLights[0].position.set(0, 4.3, -L.len * .28); hallLights[1].position.set(0, 4.3, -L.len * .72);
   hallTubes[0].userData.light = hallLights[0];
   hallTubes[hallTubes.length - 1].userData.light = hallLights[1];
-  // 벽 액자 + 막다른 벽
-  const frames = [['작심삼일 (원본)', '3일간 전시 후 철거 예정'], ['내일의 나에게', '수신 거부'], ['갓생', '미완성 · 작가 불명'], ['버킷리스트', '버킷만 남음'], ['자기계발서 7권', '포장 미개봉'], ['운동 인증 1일차', '2일차는 소실됨']];
-  for (let i = 0; i * 7 + 4 < hallLen - 2; i++) {
-    const f = frames[i % frames.length], z = -4 - i * 7;
-    crookedFrame(hallGroup, f[0], f[1], i % 2 ? 8.8 : -8.8, 2.4, z, i % 2 ? -Math.PI / 2 : Math.PI / 2);
-  }
-  const extra = list.length - shown.length;
-  const end = signBoard(extra > 0 ? `나머지 ${extra}점은 지하 수장고에서 숙면 중` : '막다른 길 · 인생처럼', 4.4, .5, { size: .42 });
-  end.position.set(0, 2.6, -hallLen + .17); hallGroup.add(end);
   colliderTarget = staticColliders; colliderTag = null;
+  return L;
 }
 function isInHall(o) { let p = o; while (p) { if (p === hallGroup) return true; p = p.parent; } return false; }
 
-// ---------- 신규 안치실 ----------
-const COFFIN_SLOTS = [[-15.6, 4.4], [-15.6, 7], [-15.6, 9.6]];
-let morgueGroup = null;
+// ---------- 신규 안치실 (관 없음: 최근 3점을 서쪽 벽에, 아래에 "방금 도착" 리본과 조화) ----------
+const MORGUE_SLOTS = [4.6, 7, 9.4].map(z => ({ x: -18.84, y: 2.05, z, rotY: Math.PI / 2 }));
+const morgueDecor = [];
+const candles = [];
 function buildMorgue() {
   const g = new THREE.Group(); world.add(g);
   room(g, { x0: -19, x1: -9, z0: 2, z1: 12, h: 4, wall: M.wallDeep, floor: floorMat(0x3a3a55, 5, 5), ceil: M.ceil, doors: { e: false } });
-  const s = signBoard('신규 안치실 — 방금 돌아가신 계획들', 5, .55, { size: .44 });
-  s.position.set(-18.83, 3.2, 7); s.rotation.y = Math.PI / 2; g.add(s);
+  const s = signBoard('신규 안치실 — 방금 돌아가신 계획들', 5, .5, { size: .44 });
+  s.position.set(-18.83, 3.35, 7); s.rotation.y = Math.PI / 2; g.add(s);
   const s2 = signBoard('여기서 우시면 됩니다 (휴지 비치)', 3.4, .42, { size: .44, border: '#8a8aa0' });
   s2.position.set(-14, 2.6, 2.17); g.add(s2);
-  // 관 3개 + 받침 + 초
-  for (const [x, z] of COFFIN_SLOTS) {
-    box(2.1, .12, .9, M.woodLight, x, 1.02, z, g);          // 뚜껑
-    box(2.0, .5, .8, M.woodDark, x, .72, z, g);             // 관
-    for (const dx of [-.8, .8]) box(.12, .46, .7, M.black, x + dx, .23, z, g);
-    for (const dz of [-.62, .62]) {
-      box(.16, 1.0, .16, M.black, x + 1.25, .5, z + dz, g);
-      mesh(geo('cyl', .05, .05, .24, 6), M.cream, x + 1.25, 1.12, z + dz, g);
-      const f = mesh(geo('sphere', .045, 6, 4), M.flame, x + 1.25, 1.28, z + dz, g); f.scale.y = 1.6;
-      candles.push(f);
+  const ribbon = textPanel(.9, .2, (c, W, H) => {
+    c.fillStyle = '#111'; c.beginPath(); c.moveTo(0, 0); c.lineTo(W, 0); c.lineTo(W - 16, H / 2); c.lineTo(W, H); c.lineTo(0, H); c.lineTo(16, H / 2); c.closePath(); c.fill();
+    c.fillStyle = '#f3efe2'; c.textAlign = 'center'; c.textBaseline = 'middle'; c.font = `700 ${H * .55}px ${FONT_SERIF}`; c.fillText('방 금 도 착', W / 2, H / 2 + 1);
+  }, 300);
+  for (const sl of MORGUE_SLOTS) {
+    const r = ribbon.clone(); r.position.set(sl.x + .01, .66, sl.z); r.rotation.y = Math.PI / 2; r.visible = false; g.add(r);
+    const empty = makeEmptyFrame('wood', '안치 대기 중', '당신의 실패를 기다립니다');
+    empty.position.set(sl.x, sl.y, sl.z); empty.rotation.y = sl.rotY; g.add(empty);
+    const flowers = [];
+    for (const dz of [-.78, .78]) {   // 조화 (흰 국화 + 노란 국화) + 초
+      const f = new THREE.Group(); f.position.set(-18.5, 0, sl.z + dz); g.add(f);
+      box(.28, .5, .28, M.black, 0, .25, 0, f);
+      for (let i = 0; i < 7; i++) {
+        const a = i / 7 * Math.PI * 2;
+        mesh(geo('sphere', .09, 6, 4), i % 3 ? M.white : mat(0xf6e27a), Math.cos(a) * .12, .62 + Math.sin(i * 2.3) * .05, Math.sin(a) * .12, f);
+      }
+      mesh(geo('sphere', .1, 6, 4), M.white, 0, .7, 0, f);
+      mesh(geo('cyl', .03, .03, .16, 6), M.cream, .1, .58, 0, f);
+      const fl = mesh(geo('sphere', .03, 6, 4), M.flame, .1, .69, 0, f); fl.scale.y = 1.6; candles.push(fl);
+      f.visible = false; flowers.push(f);
     }
-    addCollider(staticColliders, x + .1, z, 2.5, 1.2);
+    morgueDecor.push({ ribbon: r, empty, flowers });
   }
-  // 근조 화환 2개
-  for (const z of [3, 11]) wreath(g, -18.3, z);
+  addCollider(staticColliders, -18.5, 7, .5, 6);
+  for (const z of [2.6, 11.4]) wreath(g, -18.3, z);
   const light = new THREE.PointLight(0xa9b8ff, 10, 14, 1); light.position.set(-14, 3.5, 7); g.add(light);
   tube(g, -14, 3.92, 7, 3);
 }
-const candles = [];
+function setMorgueOccupancy(n) {
+  morgueDecor.forEach((d, i) => { d.ribbon.visible = i < n; d.empty.visible = i >= n; d.flowers.forEach(f => f.visible = i < n); });
+}
 function wreath(parent, x, z) {
   const g = new THREE.Group(); g.position.set(x, 0, z); g.rotation.y = Math.PI / 2; parent.add(g);
   for (const dx of [-.3, .3]) box(.05, 1.4, .05, M.woodDark, dx, .7, 0, g).rotation.z = dx * .5;
@@ -653,7 +740,7 @@ function wreath(parent, x, z) {
   const rib = textPanel(.2, .9, (c, W, H) => {
     c.fillStyle = '#f7f3ea'; c.fillRect(0, 0, W, H);
     c.fillStyle = '#111'; c.textAlign = 'center'; c.textBaseline = 'middle'; c.font = `700 ${W * .7}px ${FONT_SERIF}`;
-    [...'謹弔근조'].slice(0, 2).forEach((ch, i) => c.fillText(ch, W / 2, H * (.3 + i * .35)));
+    [...'謹弔'].forEach((ch, i) => c.fillText(ch, W / 2, H * (.3 + i * .35)));
   }, 200);
   rib.material.userData.own = true;
   rib.position.set(0, 1.4, .06); g.add(rib);
@@ -663,14 +750,15 @@ function wreath(parent, x, z) {
 // ---------- 계단 + 불멸의 흑역사관 ----------
 const STAIR = { x0: 9, x1: 17, z0: 5, z1: 9, rise: 4, steps: 16 };
 const FAME_Y = STAIR.rise;
-const PODIUMS = [ // 순위별 [z, 높이]
-  [7, 1.8], [4.5, 1.4], [9.5, 1.15], [2, .9], [12, .65],
-];
-const PODIUM_X = 28.5;
+// 순위별 금색 대형 액자 자리 (동쪽 벽), 아래에 순위 숫자 받침대
+const FAME_SLOTS = [
+  { z: 7, y: 2.95, s: 2.0, plinth: .9 }, { z: 3.3, y: 2.6, s: 1.65, plinth: .7 }, { z: 10.7, y: 2.6, s: 1.65, plinth: .7 },
+  { z: -.1, y: 2.45, s: 1.5, plinth: .5 }, { z: 14.1, y: 2.45, s: 1.5, plinth: .5 },
+].map(o => ({ ...o, x: 32.84, y: FAME_Y + o.y, rotY: -Math.PI / 2 }));
+const fameEmpty = [];
 const beams = [];
 function buildStairsAndFame() {
   const g = new THREE.Group(); world.add(g);
-  // 계단 통로
   const n = STAIR.steps, sd = (STAIR.x1 - STAIR.x0) / n, sh = STAIR.rise / n;
   for (let i = 0; i < n; i++) {
     const h = (i + 1) * sh;
@@ -684,18 +772,15 @@ function buildStairsAndFame() {
   crookedFrame(g, '계단 오르기 챌린지', '1일 만에 종료', 13, 4.2, 8.83, Math.PI, 1.2, .8);
   const stairLight = new THREE.PointLight(0xffd9a0, 8, 12, 1); stairLight.position.set(13, 6.5, 7); g.add(stairLight);
 
-  // 전당 본실
   room(g, { x0: 17, x1: 33, z0: -3, z1: 17, y: FAME_Y, h: 7, wall: M.fameWall, floor: floorMat(0x6b2a38, 8, 10), ceil: mat(0x1c0a10),
     doors: { w: [[5, 9]] } });
-  // 금색 몰딩
   for (const [x, z, w, d] of [[25, -2.84, 16, .04], [25, 16.84, 16, .04], [32.84, 7, .04, 20]]) {
-    box(w, .12, d, M.gold, x, FAME_Y + .06, z, g); box(w, .1, d, M.gold, x, FAME_Y + 6.4, z, g);
+    box(w, .12, d, M.gold, x, FAME_Y + .06, z, g); box(w, .1, d, M.gold, x, FAME_Y + 6.6, z, g);
   }
   // 붉은 카펫
-  box(PODIUM_X - 17.8, .03, 2.4, M.carpet, (17 + PODIUM_X - 1) / 2, FAME_Y + .015, 7, g);
-  for (const dz of [-1.25, 1.25]) box(PODIUM_X - 17.8, .035, .1, M.gold, (17 + PODIUM_X - 1) / 2, FAME_Y + .02, 7 + dz, g);
-  // 현판
-  const banner = textPanel(8, 1.5, (c, W, H) => {
+  box(31.6 - 17.2, .03, 2.4, M.carpet, (17.2 + 31.6) / 2, FAME_Y + .015, 7, g);
+  for (const dz of [-1.25, 1.25]) box(31.6 - 17.2, .035, .1, M.gold, (17.2 + 31.6) / 2, FAME_Y + .02, 7 + dz, g);
+  const banner = textPanel(7, 1.1, (c, W, H) => {
     const grd = c.createLinearGradient(0, 0, 0, H); grd.addColorStop(0, '#3a0d16'); grd.addColorStop(1, '#1d060b');
     c.fillStyle = grd; c.fillRect(0, 0, W, H);
     c.strokeStyle = '#e8b84a'; c.lineWidth = 10; c.strokeRect(16, 16, W - 32, H - 32);
@@ -703,52 +788,41 @@ function buildStairsAndFame() {
     c.font = `700 ${H * .38}px ${FONT_SERIF}`; c.fillText('불멸의 흑역사관', W / 2, H * .42);
     c.font = `400 ${H * .14}px ${FONT_SERIF}`; c.fillStyle = '#e9c9a0'; c.fillText('HALL OF IMMORTAL FAILURES · 공감으로 영생을 얻은 자들', W / 2, H * .76);
   });
-  banner.position.set(32.83, FAME_Y + 5.2, 7); banner.rotation.y = -Math.PI / 2; g.add(banner);
-  // 포디움 1~5위
-  PODIUMS.forEach(([z, h], i) => {
-    box(2.2, h, 2.2, i === 0 ? M.gold : mat(0x2a1a22), PODIUM_X, FAME_Y + h / 2, z, g);
-    box(2.3, .08, 2.3, M.gold, PODIUM_X, FAME_Y + h, z, g);
-    const num = textPanel(.7, .5, (c, W, H) => {
+  banner.position.set(32.83, FAME_Y + 5.85, 7); banner.rotation.y = -Math.PI / 2; g.add(banner);
+  FAME_SLOTS.forEach((sl, i) => {
+    // 순위 숫자 받침대
+    box(1.0, sl.plinth, 1.5, i === 0 ? M.gold : mat(0x2a1a22), 32.35, FAME_Y + sl.plinth / 2, sl.z, g);
+    box(1.06, .06, 1.56, M.gold, 32.35, FAME_Y + sl.plinth, sl.z, g);
+    const num = textPanel(.8, .4, (c, W, H) => {
       c.fillStyle = i === 0 ? '#2a1a0a' : '#e8b84a'; c.textAlign = 'center'; c.textBaseline = 'middle';
       c.font = `700 ${H * .8}px ${FONT_SERIF}`; c.fillText(`${i + 1}위`, W / 2, H / 2);
     });
     num.material.userData.own = true;
-    num.position.set(PODIUM_X - 1.105, FAME_Y + h - .3, z); num.rotation.y = -Math.PI / 2; g.add(num);
-    addCollider(staticColliders, PODIUM_X, z, 2.3, 2.3);
+    num.position.set(31.84, FAME_Y + sl.plinth / 2, sl.z); num.rotation.y = -Math.PI / 2; g.add(num);
+    addCollider(staticColliders, 32.35, sl.z, 1.06, 1.56);
+    // 빈 자리 (공석)
+    const e = makeEmptyFrame('gold', '공석', '공감 1개면 바로 입성');
+    e.position.set(sl.x, sl.y, sl.z); e.rotation.y = sl.rotY; e.scale.setScalar(sl.s); g.add(e);
+    fameEmpty.push(e);
     // 스포트라이트 빛기둥 (가짜 볼륨 조명)
-    const beam = mesh(geo('cone', 1.3, 7 - h, 12, 1, true), M.beam, PODIUM_X, FAME_Y + h + (7 - h) / 2, z, g);
+    const beam = mesh(geo('cone', i === 0 ? 1.6 : 1.3, 7, 12, 1, true), M.beam, 31.9, FAME_Y + 3.5, sl.z, g);
     beam.userData.phase = i;
     beams.push(beam);
   });
-  // 벨벳 로프
   for (const z of [5.4, 8.6]) for (let x = 20; x < 26; x += 2) {
     box(.08, .9, .08, M.gold, x, FAME_Y + .45, z, g);
     mesh(geo('sphere', .07, 6, 4), M.gold, x, FAME_Y + .95, z, g);
-    if (x + 2 < 26) { const r = box(2, .05, .05, M.carpet, x + 1, FAME_Y + .8, z, g); }
+    if (x + 2 < 26) box(2, .05, .05, M.carpet, x + 1, FAME_Y + .8, z, g);
   }
   for (const z of [5.4, 8.6]) addCollider(staticColliders, 23, z, 6, .15);
   crookedFrame(g, '명예의 전당 입성 조건', '공감 많이 받기 (그게 다임)', 17.2, FAME_Y + 2.4, 13, Math.PI / 2, 1.4, 1);
   crookedFrame(g, '여기까지 온 당신도', '사실 대단한 겁니다', 17.2, FAME_Y + 2.4, 1, Math.PI / 2, 1.4, 1);
-  // 조명: 금빛 스포트 2개 (모바일 고려해서 최소한만)
-  const s1 = new THREE.SpotLight(0xffd27a, 60, 16, .7, .5, 1); s1.position.set(PODIUM_X - 2, FAME_Y + 6.8, 7); s1.target.position.set(PODIUM_X, FAME_Y, 7);
+  const s1 = new THREE.SpotLight(0xffd27a, 70, 18, .75, .5, 1); s1.position.set(28.5, FAME_Y + 6.8, 7); s1.target.position.set(32.8, FAME_Y + 2.5, 7);
   const warm = new THREE.PointLight(0xff9a7a, 12, 18, 1); warm.position.set(21, FAME_Y + 5, 7);
   g.add(s1, s1.target, warm);
 }
-function fameStatuePos(rank) { const [z, h] = PODIUMS[rank]; return new THREE.Vector3(PODIUM_X, FAME_Y + h + .04, z); }
+function setFameOccupancy(n) { fameEmpty.forEach((e, i) => e.visible = i >= n); }
 
-// ---------- 전시 진열장 ----------
-function makeCase(ex, x, z, parent) {
-  const g = new THREE.Group(); g.position.set(x, 0, z); parent.add(g);
-  box(1.1, 1.0, 1.1, M.pedestal, 0, .5, 0, g);
-  box(1.18, .06, 1.18, M.trim, 0, 1.03, 0, g);
-  box(1.0, 1.0, 1.0, M.glass, 0, 1.56, 0, g);
-  box(1.06, .05, 1.06, M.trim, 0, 2.085, 0, g);
-  const obj = makeExhibitObject(ex); obj.position.y = 1.06; obj.rotation.y = rand(-.4, .4); g.add(obj);
-  const plac = makePlacard(ex); plac.position.set(0, .62, .565); plac.rotation.x = -.22; plac.rotation.z = rand(-.06, .06); g.add(plac);
-  const hit = box(1.3, 2.3, 1.3, M.hit, 0, 1.15, 0, g); hit.userData.exhibit = ex;
-  addCollider(colliderTarget, x, z, 1.2, 1.2);
-  return g;
-}
 // ---------- 구역 판정 ----------
 const ZONES = { lobby: '입구 로비', hall: '메인홀 · 일반 전시관', morgue: '신규 안치실', stairs: '전당 가는 계단', fame: '불멸의 흑역사관' };
 function zoneAt(x, z) {
@@ -771,302 +845,376 @@ function updateZone() {
 // 형광등 깜빡임, 촛불, 빛기둥 같은 분위기 애니메이션
 function updateAmbient(dt, now) {
   updateFlicker(dt, now);
-  for (const c of candles) c.scale.set(1 + Math.sin(now * .013 + c.id) * .15, 1.6 + Math.sin(now * .021 + c.id) * .3, 1);
+  for (const c of candles) if (c.parent && c.parent.visible) c.scale.set(1 + Math.sin(now * .013 + c.id) * .15, 1.6 + Math.sin(now * .021 + c.id) * .3, 1);
   for (const b of beams) b.material.opacity = .08 + Math.sin(now * .002 + b.userData.phase) * .02;
-  const t = now / 1000;
-  for (let i = animated.length - 1; i >= 0; i--) {
-    const o = animated[i];
-    if (o.userData.dead) { animated.splice(i, 1); continue; }
-    o.userData.tick(t);
-  }
-  if (currentZone === 'fame' || currentZone === 'stairs') updateConfetti(dt, t);
+  if (currentZone === 'fame' || currentZone === 'stairs') updateConfetti(dt, now / 1000);
 }
 
 // ================================================================
-//  전시품 데이터 (시드)
+//  전시품 = 벽에 걸린 액자
+//   - 사진 있음: 사진 액자 + 아래 명패
+//   - 사진 없음: 사망 원인별 색 배경의 "문구 액자" + 모서리 뱃지 + 아래 명패
+//   - 일반관/안치실 = 어두운 나무 액자, 전당 = 금색 대형 액자 + "명예 실패자" 리본
+//  액자 하나 = 병합된 프레임 메시 1개 + 그림 1장 + 명패 1장 (draw call 최소화)
+//  그림/명패 텍스처는 가까이 있거나 화면 안에 있을 때만 만들고, 멀어지면 dispose.
 // ================================================================
 const CAUSES = ['귀찮음', '마감', '의욕 증발', '팀원 잠수', '알고 보니 이미 있던 서비스', '그냥 잠'];
-const SEEDS = [
-  { id: 'seed-01', title: '3일 만에 끝난 새벽 5시 기상 프로젝트', cause: '그냥 잠', age: '3일', relic: '결제한 알람 앱 프리미엄 (연간)', epitaph: '알람은 끝까지 울렸다', empathy: 140, createdAt: '2026-08-02T05:00:00Z' },
-  { id: 'seed-02', title: '올해의 다이어트', cause: '의욕 증발', age: '11시간', relic: '치킨 영수증', epitaph: '내일의 나에게 모든 것을 맡긴다', empathy: 127, createdAt: '2026-08-04T12:00:00Z' },
-  { id: 'seed-03', title: '헬스장 1년 회원권', cause: '귀찮음', age: '출석 3회', relic: '샤워만 하고 찍은 출석 도장', epitaph: '기부 천사로 기억되리', empathy: 109, createdAt: '2026-08-06T19:30:00Z' },
-  { id: 'seed-04', title: '팀플 자료조사', cause: '팀원 잠수', age: '2주', relic: '아무도 안 연 공유 폴더', epitaph: '읽씹은 죽음의 첫 단계', empathy: 96, createdAt: '2026-08-09T23:10:00Z' },
-  { id: 'seed-05', title: '하루 영어 단어 30개 외우기', cause: '귀찮음', age: '4일', relic: '첫 장만 새까만 단어장', epitaph: 'abandon까지는 외웠다', empathy: 88, createdAt: '2026-08-11T08:00:00Z' },
-  { id: 'seed-06', title: '나만의 투두 앱 만들기', cause: '알고 보니 이미 있던 서비스', age: '6주', relic: '로고만 완성된 디자인 파일', epitaph: '세상엔 이미 투두 앱이 4만 개 있었다', empathy: 74, createdAt: '2026-08-14T02:40:00Z' },
-  { id: 'seed-07', title: '반려식물 SNS 창업', cause: '알고 보니 이미 있던 서비스', age: '2일', relic: '1년치 결제한 도메인', epitaph: '검색 한 번이면 됐는데', empathy: 67, createdAt: '2026-08-17T15:00:00Z' },
-  { id: 'seed-08', title: '배달앱 없이 한 달 살기', cause: '의욕 증발', age: '1일', relic: '지웠다가 3초 만에 재설치한 앱', epitaph: '재설치는 생각보다 빨랐다', empathy: 61, createdAt: '2026-08-20T21:00:00Z' },
-  { id: 'seed-09', title: '기타 독학', cause: 'F코드', age: '5일', relic: 'C코드만 칠 줄 아는 손가락', epitaph: 'F코드 앞에서 조용히 눈을 감다', empathy: 58, createdAt: '2026-08-23T17:20:00Z' },
-  { id: 'seed-10', title: '블로그 1일 1포스팅', cause: '마감', age: '9일', relic: '"첫 글입니다" 임시저장 17개', epitaph: '첫 글만 17번 썼다', empathy: 52, createdAt: '2026-08-26T10:00:00Z' },
-  { id: 'seed-11', title: '졸업작품 기획서', cause: '마감', age: '한 학기', relic: '최종_진짜최종_이거진짜.pptx', epitaph: '마감은 언제나 어제였다', empathy: 45, createdAt: '2026-08-29T03:30:00Z' },
-  { id: 'seed-12', title: '주말 알고리즘 스터디', cause: '팀원 잠수', age: '2회차', relic: '공지만 남은 단톡방', epitaph: '"다음 주에 봬요"가 유언이 되었다', empathy: 33, createdAt: '2026-09-02T20:00:00Z' },
-  { id: 'seed-13', title: '매일 일기 쓰기', cause: '그냥 잠', age: '3쪽', relic: '1월 1일부터 3일까지만 쓴 다이어리', epitaph: '오늘은 피곤하니 내일 쓴다', empathy: 20, createdAt: '2026-09-08T23:50:00Z' },
-  { id: 'seed-14', title: '경제 뉴스 매일 읽기', cause: '의욕 증발', age: '1주', relic: '구독만 한 채널 12개', epitaph: '알림 설정만큼은 완벽했다', empathy: 12, createdAt: '2026-09-15T07:00:00Z' },
-  { id: 'seed-15', title: '미라클 모닝 명상', cause: '그냥 잠', age: '7분', relic: '"잠들기 좋은 빗소리" 재생 기록', epitaph: '명상하다 진짜로 명을 달리함', empathy: 3, createdAt: '2026-09-21T06:07:00Z' },
-];
+const CAUSE_STYLE = {
+  '귀찮음': { bg: '#8e9099', fg: '#1d1d24', badge: '#4a4c55' },
+  '마감': { bg: '#c7373f', fg: '#fff5ee', badge: '#6f0f15' },
+  '의욕 증발': { bg: '#e6d7a6', fg: '#3a2e12', badge: '#a07d22' },
+  '팀원 잠수': { bg: '#2f5ea6', fg: '#eef4ff', badge: '#14305c' },
+  '알고 보니 이미 있던 서비스': { bg: '#3d8c68', fg: '#effff6', badge: '#1b4a35' },
+  '그냥 잠': { bg: '#4a3e7a', fg: '#efeaff', badge: '#231b4a' },
+  '기타': { bg: '#ebe5d6', fg: '#2a2233', badge: '#6b5f6f' },
+};
+const causeStyle = c => CAUSE_STYLE[c] || CAUSE_STYLE['기타'];
+const FAME_MIN = 1;                       // 공감 1 이상이어야 전당 입성 (새 작품은 안치실로)
+const PIC = { w: 1.1, h: .95 };           // 그림 영역 (m)
+const FRAME = { w: PIC.w + .18, h: PIC.h + .18 };
+const PLACARD = { w: .98, h: .4, y: -(FRAME.h / 2 + .26) };
 
-// ================================================================
-//  사망 원인별 전시 오브젝트 (진열장 안 약 0.9m 정육면체에 들어가는 크기)
-// ================================================================
-const animated = [];
-const SKIN = mat(0xf1c9a5), HAIR = mat(0x2a2030);
-const zTex = canvasTexture(128, 128, (c, W, H) => {
-  c.fillStyle = '#bcd4ff'; c.font = `700 ${H * .8}px ${FONT_SANS}`; c.textAlign = 'center'; c.textBaseline = 'middle';
-  c.fillText('Z', W / 2, H / 2 + 4);
-});
-const zMat = new THREE.SpriteMaterial({ map: zTex, transparent: true, depthWrite: false });
-const qTex = canvasTexture(128, 128, (c, W, H) => {
-  c.fillStyle = '#e8b84a'; c.fillRect(0, 0, W, H);
-  c.strokeStyle = '#6b4a10'; c.lineWidth = 8; c.strokeRect(4, 4, W - 8, H - 8);
-  c.fillStyle = '#3a2410'; c.font = `700 ${H * .7}px ${FONT_SANS}`; c.textAlign = 'center'; c.textBaseline = 'middle';
-  c.fillText('?', W / 2, H / 2 + 5);
-});
-const qMat = new THREE.MeshLambertMaterial({ map: qTex });
+function hashId(id) { let h = 2166136261; for (const ch of String(id)) { h ^= ch.codePointAt(0); h = Math.imul(h, 16777619); } return h >>> 0; }
+const tiltFor = id => ((hashId(id) % 1000) / 999 - .5) * 2 * THREE.MathUtils.degToRad(3);   // ±3°, id로 고정
 
-function causeKind(cause) { return CAUSES.includes(cause) ? cause : '기타'; }
-function makeExhibitObject(ex) {
-  const g = new THREE.Group();
-  OBJECT_BUILDERS[causeKind(ex.cause)](g);
+// 프레임(테두리 4개 + 뒤판 + 매트)을 정점 색으로 한 지오메트리에 병합
+const frameGeoCache = new Map();
+function frameGeometry(kind) {
+  if (frameGeoCache.has(kind)) return frameGeoCache.get(kind);
+  const border = new THREE.Color(kind === 'gold' ? 0xf0c350 : 0x3b2416);
+  const matC = new THREE.Color(kind === 'gold' ? 0x2a0a10 : 0xefe7d2);
+  const b = .09, d = .075, fw = FRAME.w, fh = FRAME.h;
+  const parts = [
+    [new THREE.BoxGeometry(fw, fh, .03).translate(0, 0, .015), border],
+    [new THREE.BoxGeometry(fw, b, d).translate(0, fh / 2 - b / 2, d / 2), border],
+    [new THREE.BoxGeometry(fw, b, d).translate(0, -fh / 2 + b / 2, d / 2), border],
+    [new THREE.BoxGeometry(b, fh - 2 * b, d).translate(-fw / 2 + b / 2, 0, d / 2), border],
+    [new THREE.BoxGeometry(b, fh - 2 * b, d).translate(fw / 2 - b / 2, 0, d / 2), border],
+    [new THREE.PlaneGeometry(fw - 2 * b + .002, fh - 2 * b + .002).translate(0, 0, .031), matC],
+  ].map(([g, c]) => {
+    const n = g.attributes.position.count, col = new Float32Array(n * 3);
+    for (let i = 0; i < n; i++) c.toArray(col, i * 3);
+    g.setAttribute('color', new THREE.BufferAttribute(col, 3));
+    return g;
+  });
+  const merged = mergeGeometries(parts);
+  parts.forEach(p => p.dispose());
+  frameGeoCache.set(kind, merged);
+  return merged;
+}
+Object.assign(M, {
+  frameWood: new THREE.MeshLambertMaterial({ vertexColors: true }),
+  frameGold: new THREE.MeshLambertMaterial({ vertexColors: true, emissive: 0x3a2400 }),
+  picPending: new THREE.MeshBasicMaterial({ color: 0x6d6a72 }),   // 사진 로딩 전 회색
+  placardBlank: new THREE.MeshBasicMaterial({ color: 0xefe7d2 }),
+  plaqueBlank: new THREE.MeshBasicMaterial({ color: 0xd9a93c }),
+});
+const causeBlankCache = new Map();
+function causeBlankMat(cause) {
+  const bg = causeStyle(cause).bg;
+  if (!causeBlankCache.has(bg)) causeBlankCache.set(bg, new THREE.MeshBasicMaterial({ color: bg }));
+  return causeBlankCache.get(bg);
+}
+// 공유 텍스처: 사망 원인 뱃지 / 명예 실패자 리본 / 빈 액자 / 사진 오류
+const sharedTexMat = new Map();
+function sharedPanelMat(key, w, h, draw) {
+  if (!sharedTexMat.has(key)) sharedTexMat.set(key, new THREE.MeshBasicMaterial({ map: canvasTexture(w, h, draw), transparent: true }));
+  return sharedTexMat.get(key);
+}
+function badgeMat(cause) {
+  const st = causeStyle(cause), label = CAUSES.includes(cause) ? cause : '기타 · ' + cause;
+  return sharedPanelMat('badge:' + cause, 300, 96, (c, W, H) => {
+    c.fillStyle = st.badge; c.beginPath(); c.roundRect(4, 4, W - 8, H - 8, 22); c.fill();
+    c.strokeStyle = '#fff'; c.lineWidth = 4; c.stroke();
+    c.fillStyle = '#fff'; c.textAlign = 'center'; c.textBaseline = 'middle';
+    c.font = `700 ${H * .36}px ${FONT_SANS}`; c.fillText('사인: ' + label, W / 2, H / 2 + 2, W - 30);
+  });
+}
+const ribbonMat = () => sharedPanelMat('ribbon', 460, 100, (c, W, H) => {
+  c.fillStyle = '#b3242f';
+  c.beginPath(); c.moveTo(0, 8); c.lineTo(W, 8); c.lineTo(W - 34, H / 2); c.lineTo(W, H - 8); c.lineTo(0, H - 8); c.lineTo(34, H / 2); c.closePath(); c.fill();
+  c.strokeStyle = '#f5d27a'; c.lineWidth = 4; c.beginPath(); c.moveTo(40, 16); c.lineTo(W - 40, 16); c.moveTo(40, H - 16); c.lineTo(W - 40, H - 16); c.stroke();
+  c.fillStyle = '#ffe29a'; c.textAlign = 'center'; c.textBaseline = 'middle';
+  c.font = `700 ${H * .42}px ${FONT_SERIF}`; c.fillText('명 예 실 패 자', W / 2, H / 2 + 2);
+});
+const photoErrorMat = () => sharedPanelMat('photoErr', 256, 220, (c, W, H) => {
+  c.fillStyle = '#5a5760'; c.fillRect(0, 0, W, H);
+  c.fillStyle = '#d6d3dc'; c.textAlign = 'center'; c.textBaseline = 'middle';
+  c.font = `700 ${H * .1}px ${FONT_SANS}`; c.fillText('사진도 함께', W / 2, H * .42); c.fillText('떠났습니다', W / 2, H * .58);
+});
+
+// 빈 액자 (빈 박물관 연출 / 안치 대기 / 전당 공석)
+function makeEmptyFrame(kind, text, sub = '') {
+  const g = new THREE.Group(), inner = new THREE.Group(); g.add(inner);
+  inner.add(new THREE.Mesh(frameGeometry(kind === 'gold' ? 'gold' : 'wood'), kind === 'gold' ? M.frameGold : M.frameWood));
+  const pic = new THREE.Mesh(geo('plane', PIC.w, PIC.h), sharedPanelMat('empty:' + kind + text + sub, 330, 285, (c, W, H) => {
+    c.fillStyle = kind === 'gold' ? '#2a0a10' : '#2a2638'; c.fillRect(0, 0, W, H);
+    c.strokeStyle = kind === 'gold' ? 'rgba(245,210,122,.35)' : 'rgba(255,255,255,.18)'; c.setLineDash([10, 8]); c.lineWidth = 3; c.strokeRect(14, 14, W - 28, H - 28);
+    c.fillStyle = kind === 'gold' ? '#f5d27a' : '#b9b4cc'; c.textAlign = 'center'; c.textBaseline = 'middle';
+    c.font = `700 ${H * .11}px ${FONT_SERIF}`; c.fillText(text, W / 2, H * (sub ? .43 : .5), W - 40);
+    if (sub) { c.font = `400 ${H * .07}px ${FONT_SERIF}`; c.fillText(sub, W / 2, H * .6, W - 40); }
+  }));
+  pic.position.z = .034; inner.add(pic);
   return g;
 }
-function animate(o, fn) { o.userData.tick = fn; animated.push(o); return o; }
-function chair(parent, x, rotY, tipped = 0) {
-  const c = new THREE.Group(); c.position.set(x, 0, 0); c.rotation.set(0, rotY, tipped); parent.add(c);
-  const wood = mat(0x9b6a3f);
-  box(.26, .04, .26, wood, 0, .24, 0, c);
-  box(.26, .3, .04, wood, 0, .41, -.11, c);
-  for (const [dx, dz] of [[-.11, -.11], [.11, -.11], [-.11, .11], [.11, .11]]) box(.03, .24, .03, wood, dx, .12, dz, c);
-  return c;
-}
-function giftBox(parent, x) {
-  const b = new THREE.Group(); b.position.x = x; parent.add(b);
-  box(.3, .3, .3, mat(0xd9655a), 0, .15, 0, b);
-  box(.31, .31, .05, M.gold, 0, .15, 0, b);
-  box(.05, .31, .31, M.gold, 0, .15, 0, b);
-  for (const s of [-1, 1]) mesh(geo('sphere', .06, 6, 4), M.gold, s * .05, .33, 0, b).scale.set(1.3, .8, .8);
-  return b;
-}
-const OBJECT_BUILDERS = {
-  '귀찮음'(g) { // 이불 덩어리 (안에 사람 있음)
-    const blanket = mat(0x6f9fd8), stripe = mat(0xf2d16b);
-    const b = mesh(geo('cap', .19, .42, 4, 10), blanket, .05, .19, 0, g); b.rotation.z = Math.PI / 2; b.scale.z = 1.25;
-    for (const x of [-.08, .22]) { const s = mesh(geo('cyl', .195, .195, .05, 10), stripe, x, .19, 0, g); s.rotation.z = Math.PI / 2; s.scale.z = 1.25; }
-    box(.26, .1, .34, M.white, -.38, .05, 0, g);
-    mesh(geo('sphere', .14, 10, 8), SKIN, -.36, .22, 0, g);
-    mesh(geo('sphere', .145, 10, 6, 0, Math.PI * 2, 0, Math.PI / 2), HAIR, -.38, .24, 0, g).rotation.z = .6;
-    for (const z of [-.05, .05]) box(.01, .01, .04, M.black, -.3, .22, z, g).rotation.x = .2;
-    for (const z of [-.07, .07]) mesh(geo('sphere', .06, 6, 4), mat(0xe05a5a), .42, .06, z, g);   // 양말
-    animate(b, t => { b.scale.y = 1 + Math.sin(t * 1.6) * .05; });  // 숨쉬기
-  },
-  '마감'(g) { // 부서진 시계
-    const c = new THREE.Group(); c.position.set(0, .34, 0); c.rotation.z = .32; g.add(c);
-    const rim = mesh(geo('cyl', .3, .3, .07, 16), mat(0xb3242f), 0, 0, -.02, c); rim.rotation.x = Math.PI / 2;
-    const face = mesh(geo('cyl', .26, .26, .075, 16), M.white, 0, 0, 0, c); face.rotation.x = Math.PI / 2;
-    for (const x of [-.13, .13]) mesh(geo('sphere', .08, 8, 6, 0, Math.PI * 2, 0, Math.PI / 2), M.gold, x, .3, 0, c);
-    const hourP = new THREE.Group(); hourP.position.z = .045; hourP.rotation.z = -2.2; c.add(hourP);
-    box(.035, .14, .02, M.black, 0, .07, 0, hourP);
-    const pivot = new THREE.Group(); pivot.position.z = .055; c.add(pivot);
-    box(.025, .21, .02, M.black, 0, .105, 0, pivot);
-    box(.3, .012, .01, M.black, .02, -.04, .045, c).rotation.z = -.6;   // 금
-    box(.012, .16, .01, M.black, -.08, .05, .045, c).rotation.z = .3;
-    for (const x of [-.18, .18]) box(.04, .14, .04, M.black, x * .9, -.3, 0, c).rotation.z = x > 0 ? -.4 : .4;
-    box(.12, .02, .09, M.white, .33, .01, .18, g).rotation.y = .7;       // 떨어진 조각
-    const spring = mesh(geo('cyl', .025, .025, .12, 6), M.gold, -.3, .02, .2, g); spring.rotation.z = Math.PI / 2;
-    animate(pivot, t => { pivot.rotation.z = -(Math.floor(t * 1.5) % 3) * .15 + Math.sin(t * 40) * .02; });  // 같은 자리에서 멈칫멈칫
-  },
-  '의욕 증발'(g) { // 1% 배터리 + 증발하는 의욕
-    box(.3, .5, .2, mat(0x2d2d35), 0, .25, 0, g);
-    box(.12, .05, .1, mat(0x2d2d35), 0, .525, 0, g);
-    box(.24, .06, .205, new THREE.MeshBasicMaterial({ color: 0xff3b30 }), 0, .06, 0, g);
-    box(.25, .43, .01, mat(0x44444f), 0, .25, .1, g);
-    const steamMat = mat(0xe8e6ff);
-    for (let i = 0; i < 5; i++) {
-      const s = mesh(geo('sphere', .05, 6, 4), steamMat, 0, .6, 0, g);
-      const off = i / 5;
-      animate(s, t => {
-        const k = (t * .35 + off) % 1;
-        s.position.set(Math.sin((k + off) * 9) * .08, .58 + k * .38, Math.cos(k * 7 + i) * .05);
-        s.scale.setScalar((1 - k) * 1.2 + .1);
-      });
-    }
-  },
-  '팀원 잠수'(g) { // 빈 의자 2개
-    chair(g, -.2, .15);
-    chair(g, .2, -.2);
-    box(.07, .01, .12, M.black, -.2, .265, .02, g).rotation.y = .4;  // 두고 간 폰 (읽음 1)
-    box(.28, .02, .12, mat(0xcfd6e6), 0, .02, .25, g).rotation.y = -.2; // 떨어진 명찰
-  },
-  '알고 보니 이미 있던 서비스'(g) { // 똑같은 상자 두 개
-    giftBox(g, -.19);
-    giftBox(g, .19);
-  },
-  '그냥 잠'(g) { // Zzz 떠 있는 베개
-    const p = mesh(geo('sphere', .22, 10, 6), M.white, 0, .09, 0, g); p.scale.set(1.5, .42, 1);
-    mesh(geo('sphere', .1, 8, 6), mat(0xdcdcdc), 0, .14, 0, g).scale.set(1.4, .25, 1);
-    for (let i = 0; i < 3; i++) {
-      const z = new THREE.Sprite(zMat); g.add(z);
-      animate(z, t => {
-        const k = (t * .3 + i / 3) % 1;
-        z.position.set(.1 + k * .2, .25 + k * .5, 0);
-        z.scale.setScalar(.1 + k * .14);
-        z.material.rotation = .3;
-      });
-    }
-  },
-  '기타'(g) { // 물음표 상자
-    const b = box(.36, .36, .36, qMat, 0, .3, 0, g);
-    animate(b, t => { b.rotation.y = t * .6; b.position.y = .3 + Math.sin(t * 2) * .05; });
-  },
-};
 
-// ================================================================
-//  명패 / 영정 / 전당 명패 그리기
-// ================================================================
+// ---------- 캔버스 그리기 ----------
+function drawTextCard(c, W, H, ex) {
+  const st = causeStyle(ex.cause);
+  c.fillStyle = st.bg; c.fillRect(0, 0, W, H);
+  // 조잡한 붓자국 몇 줄 (id로 고정)
+  let h = hashId(ex.id);
+  c.globalAlpha = .12; c.fillStyle = st.fg;
+  for (let i = 0; i < 7; i++) { h = Math.imul(h ^ (h >>> 13), 1274126177) >>> 0; c.fillRect((h % W) - 40, ((h >>> 8) % H), 120 + (h % 90), 6); }
+  c.globalAlpha = 1;
+  c.strokeStyle = st.fg; c.globalAlpha = .35; c.lineWidth = 3; c.strokeRect(18, 18, W - 36, H - 36); c.globalAlpha = 1;
+  c.fillStyle = st.fg; c.textAlign = 'center'; c.textBaseline = 'middle';
+  c.font = `700 ${H * .135}px ${FONT_SERIF}`;
+  const tl = wrapLines(c, ex.title, W * .84, 3);
+  const tTop = H * (tl.length === 1 ? .34 : tl.length === 2 ? .27 : .2);
+  tl.forEach((l, i) => c.fillText(l, W / 2, tTop + i * H * .15));
+  const y0 = tTop + (tl.length - 1) * H * .15 + H * .13;
+  c.globalAlpha = .6; c.fillRect(W / 2 - W * .06, y0, W * .12, 3); c.globalAlpha = 1;
+  c.font = `400 ${H * .07}px ${FONT_SERIF}`;
+  const el = wrapLines(c, `“${ex.epitaph}”`, W * .8, 3);
+  el.forEach((l, i) => c.fillText(l, W / 2, y0 + H * .1 + i * H * .085));
+}
 function drawPlacard(c, W, H, ex) {
   c.fillStyle = '#f2ecd8'; c.fillRect(0, 0, W, H);
-  c.strokeStyle = '#1b1a22'; c.lineWidth = H * .025; c.strokeRect(H * .05, H * .05, W - H * .1, H - H * .1);
-  c.fillStyle = '#111'; c.beginPath(); c.moveTo(0, 0); c.lineTo(H * .3, 0); c.lineTo(0, H * .3); c.fill();
+  c.strokeStyle = '#1b1a22'; c.lineWidth = H * .02; c.strokeRect(H * .04, H * .04, W - H * .08, H - H * .08);
+  c.fillStyle = '#111'; c.beginPath(); c.moveTo(0, 0); c.lineTo(H * .26, 0); c.lineTo(0, H * .26); c.fill();
   c.fillStyle = '#1b1a22'; c.textAlign = 'center'; c.textBaseline = 'middle';
-  c.font = `700 ${H * .135}px ${FONT_SERIF}`;
-  const lines = wrapLines(c, ex.title, W * .82, 2);
-  lines.forEach((l, i) => c.fillText(l, W / 2, lines.length > 1 ? H * (.22 + i * .16) : H * .27));
-  c.font = `400 ${H * .09}px ${FONT_SERIF}`; c.fillStyle = '#3a3440';
-  c.fillText(`향년 ${ex.age}  ·  사인: ${ex.cause}`, W / 2, H * .6, W * .88);
-  c.fillStyle = '#6b5f6f'; c.font = `400 ${H * .078}px ${FONT_SERIF}`;
-  c.fillText(`유품: ${ex.relic}`, W / 2, H * .75, W * .88);
-  c.fillStyle = '#b3242f'; c.font = `700 ${H * .075}px ${FONT_SANS}`;
-  c.fillText(`ㅠㅠ 공감 ${ex.empathy}`, W / 2, H * .88);
-}
-function makePlacard(ex) {
-  const p = textPanel(.9, .42, (c, W, H) => drawPlacard(c, W, H, ex), 720);
-  p.material.userData.own = true;
-  return p;
-}
-function drawPortrait(c, W, H, ex) {
-  const grd = c.createLinearGradient(0, 0, 0, H); grd.addColorStop(0, '#d8d6d2'); grd.addColorStop(1, '#8e8b86');
-  c.fillStyle = grd; c.fillRect(0, 0, W, H);
-  c.fillStyle = '#4a4744';
-  c.beginPath(); c.arc(W / 2, H * .33, W * .16, 0, Math.PI * 2); c.fill();
-  c.beginPath(); c.ellipse(W / 2, H * .66, W * .3, H * .17, 0, Math.PI, 0); c.fill();
-  c.fillStyle = '#f5f3ee'; c.fillRect(0, H * .7, W, H * .3);
-  c.fillStyle = '#1b1a22'; c.textAlign = 'center'; c.textBaseline = 'middle';
-  c.font = `700 ${H * .075}px ${FONT_SERIF}`;
-  const lines = wrapLines(c, '故 ' + ex.title, W * .9, 2);
-  lines.forEach((l, i) => c.fillText(l, W / 2, H * (lines.length > 1 ? .78 + i * .1 : .83)));
-  c.font = `400 ${H * .045}px ${FONT_SERIF}`; c.fillStyle = '#555';
-  c.fillText(`향년 ${ex.age}`, W / 2, H * .955, W * .9);
+  c.font = `700 ${H * .13}px ${FONT_SERIF}`;
+  c.fillText(ex.title, W / 2, H * .19, W * .86);
+  c.font = `400 ${H * .085}px ${FONT_SERIF}`; c.fillStyle = '#3a3440';
+  c.fillText(`사인: ${ex.cause}  ·  향년 ${ex.age}`, W / 2, H * .39, W * .88);
+  c.fillStyle = '#6b5f6f'; c.font = `400 ${H * .075}px ${FONT_SERIF}`;
+  c.fillText(`유품: ${ex.relic}`, W / 2, H * .55, W * .88);
+  c.fillStyle = '#2a2233'; c.font = `700 ${H * .08}px ${FONT_SERIF}`;
+  c.fillText(`“${ex.epitaph}”`, W / 2, H * .71, W * .88);
+  c.fillStyle = '#b3242f'; c.font = `700 ${H * .085}px ${FONT_SANS}`;
+  c.fillText(`ㅠㅠ 공감 ${ex.empathy}`, W / 2, H * .87);
 }
 function drawFamePlaque(c, W, H, ex, rank) {
   const grd = c.createLinearGradient(0, 0, W, H); grd.addColorStop(0, '#f7dc8a'); grd.addColorStop(.5, '#d9a93c'); grd.addColorStop(1, '#f2cd6a');
   c.fillStyle = grd; c.fillRect(0, 0, W, H);
-  c.strokeStyle = '#6b4510'; c.lineWidth = H * .03; c.strokeRect(H * .05, H * .05, W - H * .1, H - H * .1);
+  c.strokeStyle = '#6b4510'; c.lineWidth = H * .025; c.strokeRect(H * .05, H * .05, W - H * .1, H - H * .1);
   c.fillStyle = '#3a220a'; c.textAlign = 'center'; c.textBaseline = 'middle';
-  c.font = `700 ${H * .1}px ${FONT_SERIF}`; c.fillText(`제 ${rank + 1} 위`, W / 2, H * .17);
-  c.font = `700 ${H * .12}px ${FONT_SERIF}`;
-  const lines = wrapLines(c, `故「${ex.title}」`, W * .86, 2);
-  lines.forEach((l, i) => c.fillText(l, W / 2, H * (lines.length > 1 ? .34 + i * .14 : .4)));
-  c.font = `700 ${H * .1}px ${FONT_SERIF}`; c.fillText('명예 실패자', W / 2, H * .64);
-  c.font = `400 ${H * .085}px ${FONT_SERIF}`; c.fillText(`공감 ${ex.empathy}명 인증`, W / 2, H * .82);
-  // 인증 도장
-  c.save(); c.translate(W * .84, H * .8); c.rotate(-.25);
-  c.strokeStyle = '#b3242f'; c.lineWidth = H * .02; c.beginPath(); c.arc(0, 0, H * .1, 0, Math.PI * 2); c.stroke();
-  c.fillStyle = '#b3242f'; c.font = `700 ${H * .065}px ${FONT_SERIF}`; c.fillText('인증', 0, 1);
+  c.font = `700 ${H * .1}px ${FONT_SERIF}`; c.fillText(`제 ${rank + 1} 위 · 명예 실패자`, W / 2, H * .17);
+  c.font = `700 ${H * .13}px ${FONT_SERIF}`; c.fillText(`故「${ex.title}」`, W / 2, H * .36, W * .84);
+  c.font = `400 ${H * .075}px ${FONT_SERIF}`; c.fillText(`사인: ${ex.cause} · 향년 ${ex.age} · 유품: ${ex.relic}`, W / 2, H * .53, W * .84);
+  c.font = `700 ${H * .075}px ${FONT_SERIF}`; c.fillText(`“${ex.epitaph}”`, W / 2, H * .67, W * .8);
+  c.font = `700 ${H * .095}px ${FONT_SERIF}`; c.fillText(`공감 ${ex.empathy}명 인증`, W / 2, H * .84);
+  c.save(); c.translate(W * .87, H * .78); c.rotate(-.25);
+  c.strokeStyle = '#b3242f'; c.lineWidth = H * .018; c.beginPath(); c.arc(0, 0, H * .1, 0, Math.PI * 2); c.stroke();
+  c.fillStyle = '#b3242f'; c.font = `700 ${H * .06}px ${FONT_SERIF}`; c.fillText('인증', 0, 1);
   c.restore();
 }
 
-// ================================================================
-//  배치: 전당 상위 5 / 안치실 최신 3 / 나머지 메인홀
-// ================================================================
+// ---------- 액자 생성 / 콘텐츠 지연 로딩 ----------
+const frames = new Map();                 // 전시품 id → 액자 레코드
+const frameRoot = new THREE.Group(); world.add(frameRoot);
+const photoSrc = ex => ex.localPhoto || ex.photoUrl || null;
+
+function createFrame(ex, style, rank) {
+  const fame = style === 'fame';
+  const group = new THREE.Group(), inner = new THREE.Group();
+  group.add(inner); frameRoot.add(group);
+  const fm = new THREE.Mesh(frameGeometry(fame ? 'gold' : 'wood'), fame ? M.frameGold : M.frameWood);
+  fm.userData.exhibit = ex;
+  inner.add(fm);
+  const pic = new THREE.Mesh(geo('plane', PIC.w, PIC.h), photoSrc(ex) ? M.picPending : causeBlankMat(ex.cause));
+  pic.position.z = .034; inner.add(pic);
+  if (!photoSrc(ex)) {   // 문구 액자: 모서리 뱃지
+    const b = new THREE.Mesh(geo('plane', .5, .16), badgeMat(ex.cause));
+    b.position.set(FRAME.w / 2 - .16, FRAME.h / 2 - .02, .085); b.rotation.z = -.2; inner.add(b);
+  }
+  if (fame) {
+    const r = new THREE.Mesh(geo('plane', 1.05, .23), ribbonMat());
+    r.position.set(0, FRAME.h / 2 + .13, .09); r.rotation.z = -.03; inner.add(r);
+  }
+  const placard = new THREE.Mesh(geo('plane', PLACARD.w, PLACARD.h), fame ? M.plaqueBlank : M.placardBlank);
+  placard.position.set(0, PLACARD.y, .012);
+  group.add(placard);      // 명패는 삐뚤어지지 않고 벽에 반듯하게
+  const tilt = tiltFor(ex.id);
+  inner.rotation.z = tilt;
+  return { id: ex.id, ex, style, rank, zone: null, group, inner, fm, pic, placard, tilt,
+    loaded: false, photo: null, photoState: 'none', token: 0, textTex: null, placardCanvas: null, placardTex: null, placardKey: '', anim: null, move: null, slot: null };
+}
+function placardKeyOf(f) { const e = f.ex; return [f.style, f.rank, e.title, e.cause, e.age, e.relic, e.epitaph, e.empathy].join('|'); }
+function drawFramePlacard(f, force = false) {
+  if (!f.loaded) return;
+  const key = placardKeyOf(f);
+  if (!force && key === f.placardKey) return;
+  f.placardKey = key;
+  if (!f.placardCanvas) {
+    const c = document.createElement('canvas');
+    c.width = f.style === 'fame' ? 740 : 560; c.height = Math.round(c.width * PLACARD.h / PLACARD.w);
+    f.placardCanvas = c;
+    f.placardTex = new THREE.CanvasTexture(c); f.placardTex.colorSpace = THREE.SRGBColorSpace; f.placardTex.anisotropy = 4;
+    f.placard.material = new THREE.MeshBasicMaterial({ map: f.placardTex });
+  }
+  const c = f.placardCanvas, g = c.getContext('2d');
+  g.clearRect(0, 0, c.width, c.height);
+  if (f.style === 'fame') drawFamePlaque(g, c.width, c.height, f.ex, f.rank); else drawPlacard(g, c.width, c.height, f.ex);
+  f.placardTex.needsUpdate = true;
+}
+function loadFrameContent(f) {
+  f.loaded = true;
+  drawFramePlacard(f, true);
+  if (photoSrc(f.ex)) requestPhoto(f);
+  else {
+    f.textTex = canvasTexture(440, 380, (c, W, H) => drawTextCard(c, W, H, f.ex));
+    f.pic.material = new THREE.MeshBasicMaterial({ map: f.textTex });
+  }
+}
+function unloadFrameContent(f) {
+  f.loaded = false;
+  f.token++;                                   // 진행 중인 사진 로딩 취소
+  if (f.placardTex) { f.placardTex.dispose(); f.placard.material.dispose(); f.placardTex = null; f.placardCanvas = null; f.placardKey = ''; }
+  f.placard.material = f.style === 'fame' ? M.plaqueBlank : M.placardBlank;
+  if (f.textTex) { f.textTex.dispose(); f.pic.material.dispose(); f.textTex = null; }
+  if (f.photo) { f.photo.dispose(); f.pic.material.dispose(); f.photo = null; }
+  f.pic.material = photoSrc(f.ex) ? M.picPending : causeBlankMat(f.ex.cause);
+  f.pic.scale.set(1, 1, 1);
+  f.photoState = 'none';
+}
+function destroyFrame(f) { unloadFrameContent(f); f.dead = true; f.group.removeFromParent(); }
+
+// 사진: THREE.TextureLoader, 동시 3장까지, 비율 유지, sRGB
+const texLoader = new THREE.TextureLoader();
+texLoader.setCrossOrigin('anonymous');
+const photoQueue = [];
+let photoInFlight = 0;
+function requestPhoto(f) {
+  if (f.photoState !== 'none') return;
+  f.photoState = 'queued';
+  photoQueue.push(f);
+  pumpPhotos();
+}
+function pumpPhotos() {
+  while (photoInFlight < 3 && photoQueue.length) {
+    const f = photoQueue.shift();
+    if (f.dead || !f.loaded || f.photoState !== 'queued') continue;
+    f.photoState = 'loading'; photoInFlight++;
+    const token = f.token;
+    texLoader.load(photoSrc(f.ex), tex => {
+      photoInFlight--;
+      if (f.dead || !f.loaded || token !== f.token) { tex.dispose(); pumpPhotos(); return; }
+      tex.colorSpace = THREE.SRGBColorSpace; tex.anisotropy = 4;
+      f.photo = tex; f.photoState = 'loaded';
+      const a = tex.image.width / tex.image.height, A = PIC.w / PIC.h;
+      if (a > A) f.pic.scale.set(1, A / a, 1); else f.pic.scale.set(a / A, 1, 1);
+      f.pic.material = new THREE.MeshBasicMaterial({ map: tex });
+      pumpPhotos();
+    }, undefined, () => {
+      photoInFlight--;
+      if (!f.dead && token === f.token) { f.photoState = 'error'; f.pic.material = photoErrorMat(); }
+      pumpPhotos();
+    });
+  }
+}
+const _frustum = new THREE.Frustum(), _pm = new THREE.Matrix4(), _sph = new THREE.Sphere();
+let lastContentCheck = 0;
+function updateFrameContent(now) {
+  if (now - lastContentCheck < 200) return;
+  lastContentCheck = now;
+  _pm.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
+  _frustum.setFromProjectionMatrix(_pm);
+  let budget = 6;   // 한 번에 만드는 캔버스 수 제한 (프레임 튐 방지)
+  for (const f of frames.values()) {
+    const p = f.group.position, d = p.distanceTo(camera.position);
+    if (!f.loaded) {
+      if (budget > 0 && d < 18 && (d < 4 || _frustum.intersectsSphere(_sph.set(p, 1.7 * f.group.scale.x)))) { loadFrameContent(f); budget--; }
+    } else if (d > 32) unloadFrameContent(f);
+    else drawFramePlacard(f);   // 공감 수 등이 바뀌었으면 다시 그림
+  }
+}
+
+// ---------- 배치 / 애니메이션 ----------
+function placeFrame(f, slot, { drop = false, tween = false } = {}) {
+  const to = new THREE.Vector3(slot.x, slot.y, slot.z);
+  const sameWall = f.slot && f.slot.rotY === slot.rotY && f.slot.line === slot.line;
+  f.group.rotation.y = slot.rotY;
+  f.group.scale.setScalar(slot.s || 1);
+  if (tween && sameWall && f.group.position.distanceTo(to) > .01) f.move = { from: f.group.position.clone(), to, t: 0 };
+  else { f.move = null; f.group.position.copy(to); if (tween && !sameWall) drop = true; }
+  if (drop) { f.anim = { t: 0, dur: .95, h: .9, swing: (hashId(f.id) & 1 ? 1 : -1) * .35, landed: false }; f.inner.position.y = .9; }
+  f.slot = slot;
+}
+function easeOutBounce(x) {
+  const n = 7.5625, d = 2.75;
+  if (x < 1 / d) return n * x * x;
+  if (x < 2 / d) return n * (x -= 1.5 / d) * x + .75;
+  if (x < 2.5 / d) return n * (x -= 2.25 / d) * x + .9375;
+  return n * (x -= 2.625 / d) * x + .984375;
+}
+function updateFrames(dt, now) {
+  for (const f of frames.values()) {
+    if (f.anim) {   // 살짝 떨어지며 걸리는 애니메이션
+      const a = f.anim; a.t += dt;
+      const k = Math.min(1, a.t / a.dur);
+      f.inner.position.y = a.h * (1 - easeOutBounce(k));
+      f.inner.rotation.z = f.tilt + a.swing * Math.exp(-4 * k) * Math.cos(k * 14);
+      if (!a.landed && k > .36) { a.landed = true; sfx.thud(f.group.position); }
+      if (k >= 1) { f.inner.position.y = 0; f.inner.rotation.z = f.tilt; f.anim = null; }
+    }
+    if (f.move) {
+      const m = f.move; m.t += dt;
+      const k = Math.min(1, m.t / .7), e = k * k * (3 - 2 * k);
+      f.group.position.lerpVectors(m.from, m.to, e);
+      if (k >= 1) f.move = null;
+    }
+  }
+  updateFrameContent(now);
+}
+// 이모지 / 카메라 기준점: 액자 앞 0.45m, 액자 윗부분
+function anchorFor(id) {
+  const f = frames.get(id);
+  if (!f || !f.slot) return null;
+  const s = f.slot, sc = s.s || 1;
+  return new THREE.Vector3(s.x + Math.sin(s.rotY) * .45, s.y + FRAME.h * sc * .5 + .1, s.z + Math.cos(s.rotY) * .45);
+}
+
+// ---------- 배치 규칙: 전당 상위 5 (공감 ≥ 1) / 안치실 최신 3 / 나머지 메인홀 (최신순) ----------
 let exhibits = [];
-const anchors = new Map();         // 전시품 id → 말풍선/이모지 기준 위치
-let morgueDyn = null, fameDyn = null;
+const exIndex = new Map();
+const placement = new Map();
 const byRank = (a, b) => b.empathy - a.empathy || Date.parse(a.createdAt) - Date.parse(b.createdAt);
 const byNewest = (a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt);
-function topFive(list) { return [...list].sort(byRank).slice(0, 5); }
+function topFive(list = exhibits) { return list.filter(e => e.empathy >= FAME_MIN).sort(byRank).slice(0, 5); }
+function reindex() { exIndex.clear(); for (const e of exhibits) exIndex.set(e.id, e); }
 
-function layoutAll() {
-  anchors.clear();
-  const fame = topFive(exhibits);
+function layoutAll({ animate = new Set(), initial = false } = {}) {
+  const fame = topFive();
   const fameIds = new Set(fame.map(e => e.id));
   const rest = exhibits.filter(e => !fameIds.has(e.id)).sort(byNewest);
-  buildFameExhibits(fame);
-  buildMorgueExhibits(rest.slice(0, COFFIN_SLOTS.length));
-  buildHall(rest.slice(COFFIN_SLOTS.length));
-  computePlacement();
+  const morgue = rest.slice(0, MORGUE_SLOTS.length);
+  const hallAll = rest.slice(MORGUE_SLOTS.length), hall = hallAll.slice(0, HALL.max);
+  const L = ensureHallShell(hall.length, exhibits.length === 0, hallAll.length - hall.length);
+  const want = new Map();
+  fame.forEach((e, i) => want.set(e.id, { style: 'fame', rank: i, zone: 'fame', slot: FAME_SLOTS[i] }));
+  morgue.forEach((e, i) => want.set(e.id, { style: 'normal', rank: -1, zone: 'morgue', slot: MORGUE_SLOTS[i] }));
+  hall.forEach((e, i) => want.set(e.id, { style: 'normal', rank: -1, zone: 'hall', slot: hallSlot(i, L) }));
+  for (const [id, f] of frames) if (!want.has(id)) { destroyFrame(f); frames.delete(id); }
+  for (const [id, w] of want) {
+    const ex = exIndex.get(id);
+    let f = frames.get(id);
+    if (f && f.style !== w.style) { destroyFrame(f); frames.delete(id); f = null; }
+    const isNew = !f;
+    if (isNew) { f = createFrame(ex, w.style, w.rank); frames.set(id, f); }
+    const zoneChanged = f.zone && f.zone !== w.zone;
+    f.ex = ex; f.fm.userData.exhibit = ex; f.rank = w.rank; f.zone = w.zone;
+    placeFrame(f, w.slot, { drop: !initial && (animate.has(id) || (isNew && !initial) || zoneChanged), tween: !isNew && !zoneChanged });
+  }
+  setMorgueOccupancy(morgue.length);
+  setFameOccupancy(fame.length);
+  // 소장 번호(등록순)와 위치
+  placement.clear();
+  const no = new Map([...exhibits].sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt)).map((e, i) => [e.id, i + 1]));
+  for (const [id, w] of want) placement.set(id, { zone: w.zone, rank: w.rank, no: no.get(id) });
+  for (const e of hallAll.slice(HALL.max)) placement.set(e.id, { zone: 'storage', rank: -1, no: no.get(e.id) });
   collectHits();
-}
-
-function buildMorgueExhibits(list) {
-  if (morgueDyn) disposeGroup(morgueDyn);
-  morgueDyn = new THREE.Group(); world.add(morgueDyn);
-  COFFIN_SLOTS.forEach(([x, z], i) => {
-    const ex = list[i];
-    if (!ex) {
-      const s = signBoard('자리 있음 · 당신의 실패를 기다립니다', 1.9, .3, { size: .4, border: '#777' });
-      s.position.set(x, 1.1, z); s.rotation.x = -Math.PI / 2; s.rotation.z = Math.PI / 2; morgueDyn.add(s);
-      return;
-    }
-    const obj = makeExhibitObject(ex); obj.position.set(x + .15, 1.08, z); obj.rotation.y = Math.PI / 2 + rand(-.3, .3); morgueDyn.add(obj);
-    const fr = new THREE.Group(); fr.position.set(x - 1.35, 0, z); fr.rotation.y = Math.PI / 2; morgueDyn.add(fr);
-    box(.05, 1.6, .05, M.black, 0, .8, -.12, fr).rotation.x = -.1;
-    box(.74, .92, .05, M.black, 0, 1.95, 0, fr);
-    const pic = textPanel(.62, .8, (c, W, H) => drawPortrait(c, W, H, ex), 420);
-    pic.material.userData.own = true; pic.position.set(0, 1.95, .03); fr.add(pic);
-    for (const s of [-1, 1]) box(.05, .34, .012, M.black, s * .25, 2.3, .035, fr).rotation.z = s * .8;   // 검은 리본
-    const hit = box(2.9, 2.4, 1.3, M.hit, x - .3, 1.2, z, morgueDyn); hit.userData.exhibit = ex;
-    anchors.set(ex.id, new THREE.Vector3(x + .15, 1.9, z));
-  });
-}
-
-function makeFallenStatue(rank) {
-  const g = new THREE.Group();
-  g.scale.setScalar([1.75, 1.6, 1.5, 1.4, 1.35][rank]);
-  const G = mat(0xffc93c, { emissive: 0x5a3800 });
-  const cap = (r, l, x, y, z, rz = 0, ry = 0, rx = 0) => { const m = mesh(geo('cap', r, l, 3, 8), G, x, y, z, g); m.rotation.set(rx, ry, rz); return m; };
-  if (rank % 2 === 0) {
-    // 얼굴부터 넘어짐: 엉덩이는 하늘로, 한쪽 다리는 번쩍
-    cap(.2, .42, 0, .3, 0, Math.PI / 2 - .5);
-    mesh(geo('sphere', .18, 10, 8), G, -.45, .16, 0, g);
-    cap(.065, .34, -.62, .08, .24, Math.PI / 2, .5);
-    cap(.065, .34, -.62, .08, -.24, Math.PI / 2, -.5);
-    cap(.075, .4, .36, .52, .1, -.9);
-    cap(.075, .4, .42, .2, -.14, .5);
-  } else {
-    // 대자로 뻗음
-    cap(.2, .42, 0, .2, 0, Math.PI / 2);
-    mesh(geo('sphere', .18, 10, 8), G, -.52, .2, 0, g);
-    cap(.065, .36, -.28, .1, .38, Math.PI / 2, 1.1);
-    cap(.065, .36, -.28, .1, -.38, Math.PI / 2, -1.1);
-    cap(.075, .42, .5, .09, .2, Math.PI / 2, -.35);
-    cap(.075, .42, .5, .09, -.2, Math.PI / 2, .35);
-  }
-  // 바나나 껍질 (사인 추정)
-  const peel = mat(0xfff06a, { emissive: 0x3a3000 });
-  for (let i = 0; i < 3; i++) { const p = mesh(geo('sphere', .08, 6, 4), peel, .75 + Math.cos(i * 2.1) * .06, .03, .35 + Math.sin(i * 2.1) * .06, g); p.scale.set(1.6, .25, .6); p.rotation.y = i * 2.1; }
-  if (rank === 0) { // 떨어진 왕관
-    const crown = mesh(geo('cyl', .12, .1, .1, 8, 1, true), G, -.7, .1, -.28, g); crown.rotation.z = 1.2;
-    crown.material = mat(0xffc93c, { emissive: 0x5a3800, side: THREE.DoubleSide });
-  }
-  g.rotation.y = Math.PI / 2 + rand(-.35, .35);   // 입구에서 옆모습이 보이도록
-  return g;
-}
-
-function buildFameExhibits(list) {
-  if (fameDyn) disposeGroup(fameDyn);
-  fameDyn = new THREE.Group(); world.add(fameDyn);
-  dynamicColliders = dynamicColliders.filter(c => c.tag !== 'fame');
-  list.forEach((ex, i) => {
-    const pos = fameStatuePos(i);
-    const st = makeFallenStatue(i); st.position.copy(pos); fameDyn.add(st);
-    const [z] = PODIUMS[i];
-    const stand = new THREE.Group(); stand.position.set(PODIUM_X - 1.6, FAME_Y, z + .75); stand.rotation.y = -Math.PI / 2; fameDyn.add(stand);
-    box(.08, .7, .08, M.gold, 0, .35, 0, stand);
-    box(.4, .04, .3, M.gold, 0, .02, 0, stand);
-    const pl = textPanel(.95, .56, (c, W, H) => drawFamePlaque(c, W, H, ex, i), 620);
-    pl.material.userData.own = true; pl.position.set(0, .86, .06); pl.rotation.x = -.45; stand.add(pl);
-    colliderTag = 'fame'; addCollider(dynamicColliders, PODIUM_X - 1.6, z + .75, .35, .35); colliderTag = null;
-    const hit = box(2.9, 3.4, 2.4, M.hit, PODIUM_X - .6, FAME_Y + 1.7, z, fameDyn); hit.userData.exhibit = ex;
-    anchors.set(ex.id, pos.clone().add(new THREE.Vector3(0, 1.1, 0)));
-  });
 }
 
 // ================================================================
@@ -1244,98 +1392,208 @@ function updatePlayer(dt) {
 }
 
 // ================================================================
-//  저장소 (로컬 모드: localStorage + 시드)
+//  저장소: 기본은 Supabase (REST + Storage + Realtime)
+//   CONFIG가 비어 있으면 로컬 모드(localStorage, 시드 없음) + 상단 경고 배너
 // ================================================================
 const LS = {
   get(k, d) { try { const v = JSON.parse(localStorage.getItem(k)); return v ?? d; } catch { return d; } },
-  set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch { } },
+  set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); return true; } catch { return false; } },
 };
+const CONFIGURED = !!(CONFIG.SUPABASE_URL && CONFIG.SUPABASE_ANON_KEY);
+const SB_URL = (CONFIG.SUPABASE_URL || '').trim().replace(/\/+$/, '');
+const SB_KEY = (CONFIG.SUPABASE_ANON_KEY || '').trim();
+const PHOTO_BUCKET = 'exhibit-photos';
+const PHOTO_PREFIX = `${SB_URL}/storage/v1/object/public/${PHOTO_BUCKET}/`;
+const SUPABASE_JS = 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.117.2/+esm';
+
+const mine = { empathized: new Set(LS.get('fm_empathized', [])), created: new Set(LS.get('fm_created', [])) };
+function saveMine() { LS.set('fm_empathized', [...mine.empathized]); LS.set('fm_created', [...mine.created]); }
+const uuid = () => (crypto.randomUUID ? crypto.randomUUID() : 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
+  const r = Math.random() * 16 | 0; return (c === 'x' ? r : (r & 3 | 8)).toString(16);
+}));
+function safePhotoUrl(u) {
+  if (!u || typeof u !== 'string') return null;
+  if (CONFIGURED) return u.startsWith(PHOTO_PREFIX) ? u : null;   // 우리 버킷 사진만 표시
+  return u.startsWith('data:image/') ? u : null;
+}
+function fromRow(r) {
+  return { id: String(r.id), title: r.title, cause: r.cause, age: r.age, relic: r.relic, epitaph: r.epitaph,
+    empathy: r.empathy | 0, createdAt: r.created_at || r.createdAt, photoUrl: safePhotoUrl(r.photo_url ?? r.photoUrl) };
+}
+
+// ---------- 로컬 모드 ----------
 const LocalStore = {
-  mode: 'local',
   db() { return LS.get('fm_local_db', { added: [], delta: {} }); },
   async load() {
-    const db = this.db();
-    return [...SEEDS, ...db.added].map(e => ({ ...e, empathy: e.empathy + (db.delta[e.id] || 0) }));
-  },
-  async add(ex) { const db = this.db(); db.added.push(ex); LS.set('fm_local_db', db); return ex; },
-  async empathize(id) { const db = this.db(); db.delta[id] = (db.delta[id] || 0) + 1; LS.set('fm_local_db', db); return null; },
-  // 로컬 모드의 방문객 번호는 개그용 기본값 + 이 브라우저 방문 횟수
-  async visit() { const n = LS.get('fm_visits', 0) + 1; LS.set('fm_visits', n); return 4811 + n; },
-};
-// 공용 DB 모드: Supabase REST(fetch). 실패하면 storeCall()이 로컬 모드로 폴백한다.
-const RemoteStore = {
-  mode: 'remote',
-  base: (CONFIG.SUPABASE_URL || '').replace(/\/+$/, ''),
-  headers(extra = {}) {
-    const key = CONFIG.SUPABASE_ANON_KEY;
-    const h = { apikey: key, 'Content-Type': 'application/json', ...extra };
-    if (key.startsWith('eyJ')) h.Authorization = `Bearer ${key}`;   // 예전 anon JWT 키. 새 publishable 키는 apikey 헤더만.
-    return h;
-  },
-  async req(path, opts = {}) {
-    const ctrl = new AbortController(), timer = setTimeout(() => ctrl.abort(), 7000);
-    try {
-      const r = await fetch(this.base + path, { ...opts, headers: this.headers(opts.headers), signal: ctrl.signal });
-      if (!r.ok) throw new Error(`Supabase ${r.status}: ${await r.text()}`);
-      const t = await r.text();
-      return t ? JSON.parse(t) : null;
-    } finally { clearTimeout(timer); }
-  },
-  fromRow: r => ({ id: String(r.id), title: r.title, cause: r.cause, age: r.age, relic: r.relic, epitaph: r.epitaph, empathy: r.empathy | 0, createdAt: r.created_at }),
-  async load() {
-    // 최신 300개 + 공감 상위 10개 (오래된 전당 작품이 빠지지 않도록)
-    const [recent, top] = await Promise.all([
-      this.req('/rest/v1/exhibits?select=*&order=created_at.desc&limit=300'),
-      this.req('/rest/v1/exhibits?select=*&order=empathy.desc,created_at.asc&limit=10'),
-    ]);
-    const map = new Map();
-    for (const r of [...top, ...recent]) map.set(String(r.id), this.fromRow(r));
-    return [...map.values()];
+    const d = this.db();
+    return d.added.filter(e => !String(e.id).startsWith('seed-')).map(e => ({ ...fromRow(e), empathy: (e.empathy | 0) + (d.delta[e.id] || 0) }));
   },
   async add(ex) {
-    const body = { title: ex.title, cause: ex.cause, age: ex.age, relic: ex.relic, epitaph: ex.epitaph };
-    const rows = await this.req('/rest/v1/exhibits', { method: 'POST', headers: { Prefer: 'return=representation' }, body: JSON.stringify(body) });
-    return this.fromRow(rows[0]);
+    const d = this.db();
+    d.added.push({ id: ex.id, title: ex.title, cause: ex.cause, age: ex.age, relic: ex.relic, epitaph: ex.epitaph, empathy: 0, createdAt: ex.createdAt, photoUrl: ex.photoUrl || null });
+    if (!LS.set('fm_local_db', d)) throw new Error('quota');
   },
   async empathize(id) {
-    const n = await this.req('/rest/v1/rpc/increment_empathy', { method: 'POST', body: JSON.stringify({ exhibit_id: id }) });
-    return typeof n === 'number' ? n : null;
+    const d = this.db();
+    d.delta[id] = (d.delta[id] || 0) + 1;
+    LS.set('fm_local_db', d);
+    const base = d.added.find(e => e.id === id);
+    return base ? (base.empathy | 0) + d.delta[id] : null;
+  },
+  async visit() { const n = LS.get('fm_visits', 0) + 1; LS.set('fm_visits', n); return n; },
+};
+
+// ---------- Supabase REST / Storage (fetch) ----------
+function sbHeaders(extra = {}) {
+  const h = { apikey: SB_KEY, ...extra };
+  if (SB_KEY.startsWith('eyJ')) h.Authorization = `Bearer ${SB_KEY}`;   // 예전 anon JWT 키. 새 publishable 키는 apikey 헤더만.
+  return h;
+}
+async function sbFetch(path, opts = {}, timeout = 8000) {
+  const ctrl = new AbortController(), timer = setTimeout(() => ctrl.abort(), timeout);
+  try {
+    const r = await fetch(SB_URL + path, { ...opts, headers: sbHeaders(opts.headers), signal: ctrl.signal });
+    const text = await r.text();
+    if (!r.ok) throw new Error(`Supabase ${r.status}: ${text.slice(0, 200)}`);
+    return text ? JSON.parse(text) : null;
+  } finally { clearTimeout(timer); }
+}
+const Remote = {
+  async load() {
+    // 최신 300개 + 공감 상위 10개 (오래된 전당 작품도 빠지지 않게)
+    const [recent, top] = await Promise.all([
+      sbFetch('/rest/v1/exhibits?select=*&order=created_at.desc&limit=300'),
+      sbFetch('/rest/v1/exhibits?select=*&empathy=gte.1&order=empathy.desc,created_at.asc&limit=10'),
+    ]);
+    const map = new Map();
+    for (const r of [...top, ...recent]) map.set(String(r.id), fromRow(r));
+    return [...map.values()];
+  },
+  async insert(ex) {
+    const body = { id: ex.id, title: ex.title, cause: ex.cause, age: ex.age, relic: ex.relic, epitaph: ex.epitaph, photo_url: ex.photoUrl || null };
+    const rows = await sbFetch('/rest/v1/exhibits', { method: 'POST', headers: { 'Content-Type': 'application/json', Prefer: 'return=representation' }, body: JSON.stringify(body) });
+    return fromRow(rows[0]);
+  },
+  async uploadPhoto(id, blob) {
+    const path = `${id}.jpg`;
+    await sbFetch(`/storage/v1/object/${PHOTO_BUCKET}/${path}`, {
+      method: 'POST', headers: { 'Content-Type': 'image/jpeg', 'x-upsert': 'false', 'cache-control': 'max-age=31536000' }, body: blob,
+    }, 20000);
+    return PHOTO_PREFIX + path;
+  },
+  async empathize(id) {
+    const n = await sbFetch('/rest/v1/rpc/increment_empathy', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ exhibit_id: id }) });
+    if (typeof n !== 'number') throw new Error('increment_empathy: 대상 없음');
+    return n;
   },
   async visit() {
-    const n = await this.req('/rest/v1/rpc/register_visit', { method: 'POST', body: '{}' });
-    if (typeof n !== 'number') throw new Error('visit counter');
+    const n = await sbFetch('/rest/v1/rpc/register_visit', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+    if (typeof n !== 'number') throw new Error('register_visit');
     return n;
   },
 };
-let Store = CONFIG.SUPABASE_URL && CONFIG.SUPABASE_ANON_KEY ? RemoteStore : LocalStore;
-async function storeCall(name, ...args) {
-  try { return await Store[name](...args); }
-  catch (e) {
-    if (Store === LocalStore) throw e;
-    console.warn('[실패 박물관] 공용 저장소 오류 → 로컬 모드로 전환', e);
-    Store = LocalStore;
-    if (started) toast('공용 저장소에 연결하지 못해 이 브라우저 전용(로컬) 모드로 전환했습니다.');
-    return LocalStore[name](...args);
+
+// ================================================================
+//  동기화: Realtime(초록) → 끊기면 5초 폴링(노랑) → 서버 불가(빨강)
+// ================================================================
+const Net = { status: CONFIGURED ? 'offline' : 'local', subscribed: false, pollTimer: null, channel: null, client: null, lastSync: 0 };
+const STATUS_TEXT = {
+  realtime: '실시간 연결됨 — 다른 방문자의 등록·공감이 바로 보입니다',
+  polling: '실시간 연결이 끊겨 5초마다 확인 중',
+  offline: '오프라인 — 서버에 연결할 수 없습니다 (자동 재시도)',
+  local: '로컬 모드 — 다른 방문자와 공유되지 않습니다',
+};
+function setStatus(s) {
+  if (Net.status === s) return;
+  Net.status = s;
+  const dot = $('#connDot');
+  dot.className = s === 'local' ? 'offline' : s;
+  dot.title = STATUS_TEXT[s];
+  dot.setAttribute('aria-label', STATUS_TEXT[s]);
+}
+function startPolling() {
+  if (!CONFIGURED || Net.pollTimer) return;
+  Net.pollTimer = setInterval(syncOnce, 5000);
+}
+function stopPolling() { clearInterval(Net.pollTimer); Net.pollTimer = null; }
+let syncing = false;
+async function syncOnce() {
+  if (!CONFIGURED || syncing) return;
+  syncing = true;
+  try {
+    const rows = await Remote.load();
+    mergeRows(rows, { animateNew: true });
+    Net.lastSync = Date.now();
+    setStatus(Net.subscribed ? 'realtime' : 'polling');
+  } catch (e) {
+    console.warn('[실패 박물관] 동기화 실패', e);
+    setStatus('offline');
+    startPolling();
+  } finally { syncing = false; }
+}
+async function connectRealtime() {
+  let createClient;
+  try { ({ createClient } = await import(SUPABASE_JS)); }
+  catch (e) { console.warn('[실패 박물관] supabase-js 로드 실패 → 폴링', e); if (Net.status !== 'offline') setStatus('polling'); startPolling(); return; }
+  Net.client = createClient(SB_URL, SB_KEY, { auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false } });
+  Net.channel = Net.client.channel('exhibits-feed')
+    .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'exhibits' }, p => mergeRows([fromRow(p.new)], { animateNew: true }))
+    .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'exhibits' }, p => mergeRows([fromRow(p.new)]))
+    .subscribe((status, err) => {
+      if (status === 'SUBSCRIBED') {
+        Net.subscribed = true; stopPolling(); setStatus('realtime');
+        syncOnce();   // 끊겨 있던 동안 놓친 변경 따라잡기
+      } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
+        if (err) console.warn('[실패 박물관] Realtime', status, err);
+        Net.subscribed = false;
+        if (Net.status !== 'offline') setStatus('polling');
+        startPolling();
+      }
+    });
+  // 구독 응답이 늦으면 일단 폴링으로 버틴다
+  setTimeout(() => { if (!Net.subscribed) { if (Net.status !== 'offline') setStatus('polling'); startPolling(); } }, 8000);
+}
+document.addEventListener('visibilitychange', () => { if (!document.hidden && CONFIGURED) syncOnce(); });
+addEventListener('online', () => CONFIGURED && syncOnce());
+addEventListener('offline', () => CONFIGURED && setStatus('offline'));
+
+// 서버/실시간 데이터 병합 (id 기준 → 낙관적 반영분과 중복 없음)
+const pendingEmp = new Set();
+let pendingLayout = null;
+function mergeRows(rows, { animateNew = false } = {}) {
+  const fresh = [];
+  for (const r of rows) {
+    const e = exIndex.get(r.id);
+    if (!e) { exhibits.push(r); exIndex.set(r.id, r); fresh.push(r); continue; }
+    const emp = pendingEmp.has(r.id) ? Math.max(r.empathy, e.empathy) : r.empathy;
+    if (emp !== e.empathy) { scheduleLayout(); e.empathy = emp; }
+    if (r.photoUrl && e.photoUrl !== r.photoUrl) e.photoUrl = r.photoUrl;
+    if (e.pending) { e.pending = false; e.createdAt = r.createdAt || e.createdAt; }
+  }
+  if (fresh.length) {
+    ensureFonts(exhibitText(fresh));
+    scheduleLayout(animateNew ? fresh.map(e => e.id) : []);
+    if (initialLoaded) fresh.filter(e => !mine.created.has(e.id)).slice(0, 2).forEach(e => toast(`새 고인 도착: 故「${esc(e.title)}」 — 신규 안치실`, 3800));
   }
 }
-// 공용 모드에서는 다른 방문객의 등록/공감을 주기적으로 반영 (순위가 오르면 속보)
-async function syncRemote() {
-  if (Store !== RemoteStore || document.hidden || camTween || uiOpen === 'register') return;
-  let list;
-  try { list = await RemoteStore.load(); } catch { return; }
-  const before = topFive(exhibits).map(e => e.id);
-  const byId = new Map(exhibits.map(e => [e.id, e]));
-  let changed = false;
-  for (const r of list) {
-    const e = byId.get(r.id);
-    if (!e) { exhibits.push(r); changed = true; }
-    else if (r.empathy > e.empathy) { e.empathy = r.empathy; changed = true; }
+// 여러 이벤트가 몰려도 한 번만 재배치하고, 그 사이 순위 변화를 속보로 알린다
+function scheduleLayout(animateIds = []) {
+  if (!pendingLayout) {
+    pendingLayout = { before: topFive().map(e => e.id), animate: new Set() };
+    setTimeout(flushLayout, 60);
   }
-  if (changed) { await ensureFonts(exhibitText(list)); applyChanges(before); }
+  animateIds.forEach(id => pendingLayout.animate.add(id));
 }
-setInterval(syncRemote, 25000);
-const mine = { empathized: new Set(LS.get('fm_empathized', [])), created: new Set(LS.get('fm_created', [])) };
-function saveMine() { LS.set('fm_empathized', [...mine.empathized]); LS.set('fm_created', [...mine.created]); }
+function flushLayout() {
+  const p = pendingLayout; pendingLayout = null;
+  if (!p) return;
+  layoutAll({ animate: p.animate });
+  topFive().forEach((e, i) => {
+    const old = p.before.indexOf(e.id);
+    if (old === -1 || i < old) announceRank(e, i, old === -1);
+  });
+  refreshDetail();
+}
 
 // ================================================================
 //  금칙어 (욕설 / 광고) — 공백·기호를 지운 뒤 포함 여부 검사
@@ -1349,25 +1607,9 @@ function hasBanned(text) {
   return BANNED.some(w => t.includes(w));
 }
 const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-
-// ================================================================
-//  배치 정보 (구역/순위/소장 번호)
-// ================================================================
-const placement = new Map();
-function computePlacement() {
-  placement.clear();
-  const fame = topFive(exhibits);
-  const fameIds = new Set(fame.map(e => e.id));
-  const rest = exhibits.filter(e => !fameIds.has(e.id)).sort(byNewest);
-  const nos = [...exhibits].sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt));
-  const no = new Map(nos.map((e, i) => [e.id, i + 1]));
-  fame.forEach((e, i) => placement.set(e.id, { zone: 'fame', rank: i, no: no.get(e.id) }));
-  rest.forEach((e, i) => placement.set(e.id, { zone: i < COFFIN_SLOTS.length ? 'morgue' : 'hall', no: no.get(e.id) }));
-}
 function placeLabel(p) {
   if (!p) return '';
-  if (p.zone === 'fame') return `불멸의 흑역사관 ${p.rank + 1}위`;
-  return p.zone === 'morgue' ? '신규 안치실' : '메인홀';
+  return { fame: `불멸의 흑역사관 ${p.rank + 1}위`, morgue: '신규 안치실', hall: '메인홀', storage: '지하 수장고' }[p.zone] || '';
 }
 
 // ================================================================
@@ -1377,8 +1619,7 @@ const raycaster = new THREE.Raycaster();
 const _ndc = new THREE.Vector2();
 let hitList = [], hovered = null, lastRay = 0, uiOpen = null, selected = null, camTween = null;
 function collectHits() {
-  hitList = [];
-  for (const g of [hallGroup, morgueDyn, fameDyn]) if (g) g.traverse(o => { if (o.userData.exhibit) hitList.push(o); });
+  hitList = [...frames.values()].map(f => f.fm);
   if (npc.hit) hitList.push(npc.hit);
 }
 function pickAt(nx, ny, far) {
@@ -1390,7 +1631,7 @@ function pickAt(nx, ny, far) {
 function updateHover(now) {
   if (now - lastRay < 90 || uiOpen || camTween) return;
   lastRay = now;
-  const ex = pickAt(0, 0, 4.8);
+  const ex = pickAt(0, 0, 5.5);
   if (ex === hovered) return;
   hovered = ex;
   $('#crosshair').classList.toggle('on', !!ex);
@@ -1401,9 +1642,8 @@ function updateHover(now) {
 function interact() { if (hovered && !uiOpen) openDetail(hovered); }
 function onTap(x, y) {
   if (uiOpen) return;
-  const ex = pickAt(x / innerWidth * 2 - 1, -(y / innerHeight) * 2 + 1, 7);
+  const ex = pickAt(x / innerWidth * 2 - 1, -(y / innerHeight) * 2 + 1, 8);
   if (ex) openDetail(ex);
-  else if (typeof tapNpc === 'function') tapNpc(x, y);
 }
 
 function openDetail(ex) {
@@ -1414,7 +1654,6 @@ function openDetail(ex) {
   refreshDetail();
   $('#detail').hidden = false;
   $('#btnLook').hidden = true;
-  director('view', ex);
 }
 function refreshDetail() {
   const ex = selected;
@@ -1422,53 +1661,64 @@ function refreshDetail() {
   const p = placement.get(ex.id);
   $('#dKicker').textContent = `소장품 제 ${p ? p.no : '?'}호 · ${placeLabel(p)}${mine.created.has(ex.id) ? ' · 내가 안치함' : ''}`;
   $('#dTitle').textContent = ex.title;
+  const src = photoSrc(ex), img = $('#dPhoto');
+  if (src) { if (img.getAttribute('src') !== src) img.src = src; img.hidden = false; } else { img.hidden = true; img.removeAttribute('src'); }
   $('#dAge').textContent = ex.age;
   $('#dCause').textContent = ex.cause;
   $('#dRelic').textContent = ex.relic;
   $('#dEpitaph').textContent = `“${ex.epitaph}”`;
   $('#dEmp').textContent = `${ex.empathy}명이 “나도 이런 적 있음”을 눌렀습니다`;
   const done = mine.empathized.has(ex.id);
-  $('#btnEmpathy').disabled = done;
-  $('#btnEmpathy').textContent = done ? '공감 완료 · 함께 슬퍼해 주셔서 감사합니다' : 'ㅠㅠ 나도 이런 적 있음';
+  $('#btnEmpathy').disabled = done || ex.pending;
+  $('#btnEmpathy').textContent = ex.pending ? '안치 절차 진행 중...' : done ? '공감 완료 · 함께 슬퍼해 주셔서 감사합니다' : 'ㅠㅠ 나도 이런 적 있음';
 }
 function closeUI() {
   $('#detail').hidden = true;
   $('#register').hidden = true;
+  $('#lightbox').hidden = true;
   uiOpen = null; selected = null;
   document.body.classList.remove('panel-open');
   lastRay = 0; hovered = undefined;
   setHint(defaultHint());
 }
+function openLightbox(src) {
+  $('#lightbox img').src = src;
+  $('#lightbox').hidden = false;
+}
 
 // ================================================================
-//  공감 → 이모지, 카운트, 순위 변동 속보
+//  공감 → 즉시 반영(낙관적) → RPC → 서버 값으로 확정 / 실패 시 되돌림
 // ================================================================
 async function doEmpathy(ex) {
-  if (!ex || mine.empathized.has(ex.id)) return;
+  if (!ex || ex.pending || mine.empathized.has(ex.id) || pendingEmp.has(ex.id)) return;
   mine.empathized.add(ex.id); saveMine();
-  const before = topFive(exhibits).map(e => e.id);
+  pendingEmp.add(ex.id);
+  scheduleLayout();
   ex.empathy += 1;
   floatEmoji(ex);
   sfx.pop();
   director('empathy', ex);
   refreshDetail();
-  try { const n = await storeCall('empathize', ex.id); if (typeof n === 'number') ex.empathy = Math.max(ex.empathy, n); } catch { }
-  applyChanges(before);
-}
-function applyChanges(beforeTop) {
-  layoutAll();
-  topFive(exhibits).forEach((e, i) => {
-    const old = beforeTop.indexOf(e.id);
-    if (old === -1 || i < old) announceRank(e, i, old === -1);
-  });
-  refreshDetail();
+  try {
+    const n = CONFIGURED ? await Remote.empathize(ex.id) : await LocalStore.empathize(ex.id);
+    if (typeof n === 'number') { pendingEmp.delete(ex.id); scheduleLayout(); ex.empathy = n; }
+  } catch (e) {
+    console.warn('[실패 박물관] 공감 전송 실패', e);
+    scheduleLayout();
+    ex.empathy = Math.max(0, ex.empathy - 1);
+    mine.empathized.delete(ex.id); saveMine();
+    toast('공감을 서버에 전달하지 못했습니다. 잠시 후 다시 눌러 주세요.');
+  } finally {
+    pendingEmp.delete(ex.id);
+    refreshDetail();
+  }
 }
 function announceRank(ex, rank, isNew) {
   toast(`<b>속보</b>故「${esc(ex.title)}」님의 실패가 ${rank + 1}위로 ${isNew ? '진입했습니다' : '올라섰습니다'}`, 5500, 'breaking');
-  if (isNew) { confettiBurst(); sfx.fanfare(); }
+  if (isNew) { confettiBurst(); if (currentZone === 'fame' || currentZone === 'stairs') sfx.fanfare(); }
 }
 function floatEmoji(ex) {
-  const a = anchors.get(ex.id);
+  const a = anchorFor(ex.id);
   if (!a) return;
   ['ㅠㅠ 나도', '🥲', 'ㅠㅠ'].forEach((txt, i) => setTimeout(() => {
     const el = document.createElement('div');
@@ -1482,9 +1732,74 @@ function floatEmoji(ex) {
 }
 
 // ================================================================
-//  등록 (모달 폼) → 신규 안치실로 카메라 이동
+//  사진 첨부: MIME 검사 → 5MB 초과 거절 → Canvas 리사이즈(긴 변 1000px) → JPEG 0.8 → 500KB 넘으면 재압축
 // ================================================================
-let registeredEver = LS.get('fm_created', []).length > 0;
+const PHOTO = { maxBytes: 5 * 1024 * 1024, target: 500 * 1024, edge: 1000 };
+let pendingPhoto = null;   // { blob, url, w, h }
+class PhotoError extends Error { }
+function loadImageEl(url) {
+  return new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = url; });
+}
+const canvasBlob = (c, q) => new Promise(res => c.toBlob(res, 'image/jpeg', q));
+async function compressPhoto(file) {
+  if (!file.type || !/^image\//.test(file.type)) throw new PhotoError('이미지 파일만 첨부할 수 있어요. (jpg, png, webp 등)');
+  if (file.size > PHOTO.maxBytes) throw new PhotoError(`사진이 5MB를 넘어요 (${(file.size / 1048576).toFixed(1)}MB). 더 작은 사진을 고르거나 사진 없이 등록해 주세요.`);
+  let src, w, h, tmpUrl = null;
+  try {
+    if (window.createImageBitmap) { src = await createImageBitmap(file, { imageOrientation: 'from-image' }); w = src.width; h = src.height; }
+    else throw 0;
+  } catch {
+    try { tmpUrl = URL.createObjectURL(file); src = await loadImageEl(tmpUrl); w = src.naturalWidth; h = src.naturalHeight; }
+    catch { if (tmpUrl) URL.revokeObjectURL(tmpUrl); throw new PhotoError('이 사진 형식은 브라우저에서 열 수 없어요(HEIC 등). 다른 사진을 고르거나 사진 없이 등록해 주세요.'); }
+  }
+  let scale = Math.min(1, PHOTO.edge / Math.max(w, h)), blob = null, cw = 0, ch = 0;
+  for (let attempt = 0; attempt < 5; attempt++) {
+    cw = Math.max(1, Math.round(w * scale)); ch = Math.max(1, Math.round(h * scale));
+    const c = document.createElement('canvas'); c.width = cw; c.height = ch;
+    const g = c.getContext('2d');
+    g.fillStyle = '#fff'; g.fillRect(0, 0, cw, ch);        // 투명 PNG 배경
+    g.drawImage(src, 0, 0, cw, ch);
+    let q = .8;
+    blob = await canvasBlob(c, q);
+    while (blob && blob.size > PHOTO.target && q > .45) { q -= .1; blob = await canvasBlob(c, q); }
+    if (blob && blob.size <= PHOTO.target) break;
+    scale *= .8;
+  }
+  if (src.close) src.close();
+  if (tmpUrl) URL.revokeObjectURL(tmpUrl);
+  if (!blob) throw new PhotoError('사진을 변환하지 못했어요. 사진 없이 등록해 주세요.');
+  return { blob, w: cw, h: ch };
+}
+async function onPhotoPicked() {
+  const input = $('#photoInput'), file = input.files && input.files[0];
+  clearPhoto(false);
+  if (!file) return;
+  const msg = $('#photoMsg');
+  msg.className = 'photo-msg'; msg.textContent = '사진을 줄이는 중...';
+  try {
+    const r = await compressPhoto(file);
+    pendingPhoto = { ...r, url: URL.createObjectURL(r.blob) };
+    $('#photoPreview img').src = pendingPhoto.url;
+    $('#photoPreview').hidden = false;
+    msg.textContent = `첨부됨: ${r.w}×${r.h}px, ${Math.round(r.blob.size / 1024)}KB (원본 ${Math.round(file.size / 1024)}KB)`;
+  } catch (e) {
+    input.value = '';
+    msg.className = 'photo-msg bad';
+    msg.textContent = e instanceof PhotoError ? e.message : '사진을 처리하지 못했어요. 사진 없이 등록할 수 있어요.';
+  }
+}
+function clearPhoto(resetInput = true) {
+  if (pendingPhoto) { URL.revokeObjectURL(pendingPhoto.url); pendingPhoto = null; }
+  $('#photoPreview').hidden = true;
+  $('#photoPreview img').removeAttribute('src');
+  if (resetInput) { $('#photoInput').value = ''; $('#photoMsg').textContent = ''; }
+}
+const blobToDataURL = b => new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = rej; r.readAsDataURL(b); });
+
+// ================================================================
+//  등록: 즉시 안치(낙관적) → 사진 업로드 → DB insert → 실패하면 되돌리고 폼을 다시 연다
+// ================================================================
+let registeredEver = mine.created.size > 0;
 function openRegister() {
   unlockPointer();
   closeUI();
@@ -1507,34 +1822,65 @@ async function submitRegister(e) {
   if (!d.age) return err.textContent = '향년을 적어 주세요. (예: 3일)';
   if ([...d.title].length > 40 || [d.cause, d.age, d.relic, d.epitaph].some(s => [...s].length > 60)) return err.textContent = '제목은 40자, 나머지는 60자까지입니다.';
   if (hasBanned(Object.values(d).join(' '))) return err.textContent = '욕설이나 광고로 보이는 표현이 있어요. 고인이 부끄러워합니다.';
+  if (CONFIGURED && Net.status === 'offline') return err.textContent = '지금은 서버에 연결되어 있지 않아요(우측 상단 빨간 점). 잠시 후 다시 시도해 주세요.';
   const last = LS.get('fm_last_reg', 0);
   if (Date.now() - last < 30000) return err.textContent = `방금 안치하셨어요. ${Math.ceil((30000 - (Date.now() - last)) / 1000)}초만 묵념하고 다시 와 주세요.`;
-  const btn = form.querySelector('[type=submit]');
-  btn.disabled = true; btn.textContent = '안치 중...';
+  const photo = pendingPhoto;
   const ex = {
-    id: 'u-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
-    title: d.title, cause: d.cause, age: d.age,
+    id: uuid(), title: d.title, cause: d.cause, age: d.age,
     relic: d.relic || '없음 (빈손으로 감)', epitaph: d.epitaph || '고인은 말이 없다',
-    empathy: 0, createdAt: new Date().toISOString(),
+    empathy: 0, createdAt: new Date().toISOString(), photoUrl: null, localPhoto: photo ? photo.url : null, pending: true,
   };
-  let saved = ex;
-  try { saved = await storeCall('add', ex) || ex; } catch { }
-  btn.disabled = false; btn.textContent = '안치하기';
-  mine.created.add(saved.id); saveMine();
+  // 1) 낙관적 반영: 바로 안치실 벽에 걸고 카메라 이동
+  exhibits.push(ex); exIndex.set(ex.id, ex);
+  mine.created.add(ex.id); saveMine();
   LS.set('fm_last_reg', Date.now());
   registeredEver = true;
-  exhibits.push(saved);
-  await ensureFonts(exhibitText([saved]));
-  layoutAll();
+  pendingPhoto = null;                    // 이 blob URL은 이제 액자가 쓴다
+  await ensureFonts(exhibitText([ex]));
+  layoutAll({ animate: new Set([ex.id]) });
   closeUI();
-  form.reset(); syncCauseField(); updateCounts();
-  const a = anchors.get(saved.id) || new THREE.Vector3(-15.4, 1.9, 4.4);
-  flyTo(new THREE.Vector3(a.x + 3.3, 1.75, a.z), new THREE.Vector3(a.x - .8, 1.35, a.z), () => {
-    director('registered', saved);
-    sfx.trombone();
-    setHint(defaultHint());
-  });
-  toast(`故「${esc(saved.title)}」 신규 안치실에 안치되었습니다`, 4200);
+  const f = frames.get(ex.id);
+  if (f) {
+    const s = f.slot, nx = Math.sin(s.rotY), nz = Math.cos(s.rotY);
+    flyTo(new THREE.Vector3(s.x + nx * 3.1, floorAt(s.x + nx * 3.1, s.z + nz * 3.1) + 1.7, s.z + nz * 3.1), new THREE.Vector3(s.x, s.y - .25, s.z), () => {
+      director('registered', ex);
+      sfx.trombone();
+      setHint(defaultHint());
+    });
+  }
+  // 2) 서버 저장
+  try {
+    if (CONFIGURED) {
+      if (photo) {
+        try { ex.photoUrl = await Remote.uploadPhoto(ex.id, photo.blob); }
+        catch (upErr) { upErr.photo = true; throw upErr; }
+      }
+      const row = await Remote.insert(ex);
+      mergeRows([row]);
+    } else {
+      if (photo) {
+        try { ex.photoUrl = await blobToDataURL(photo.blob); await LocalStore.add(ex); }
+        catch { ex.photoUrl = null; await LocalStore.add(ex); toast('브라우저 저장 공간이 부족해 사진은 빼고 안치했습니다.'); }
+      } else await LocalStore.add(ex);
+      ex.pending = false;
+    }
+    form.reset(); syncCauseField(); updateCounts(); $('#photoPreview').hidden = true; $('#photoMsg').textContent = ''; $('#photoInput').value = '';
+    refreshDetail();
+  } catch (e2) {
+    // 3) 실패: 되돌리고 입력값을 유지한 채 폼을 다시 연다
+    console.warn('[실패 박물관] 등록 실패', e2);
+    exhibits = exhibits.filter(x => x.id !== ex.id); exIndex.delete(ex.id);
+    mine.created.delete(ex.id); saveMine();
+    LS.set('fm_last_reg', 0);
+    layoutAll();
+    if (photo) pendingPhoto = photo;
+    openRegister();
+    $('#regErr').textContent = e2.photo
+      ? '사진 업로드에 실패했어요. 다시 시도하거나 「사진 지우기」 후 사진 없이 등록해 주세요.'
+      : '서버에 저장하지 못했어요. 네트워크를 확인하고 다시 눌러 주세요. (입력한 내용은 그대로 있어요)';
+    toast('안치에 실패했습니다. 고인이 아직 떠날 준비가 안 됐나 봅니다.');
+  }
 }
 function syncCauseField() {
   const other = $('#regForm [name=cause]').value === '기타';
@@ -1554,7 +1900,7 @@ function flyTo(pos, lookAt, done) {
   const pts = [start];
   const z = zoneAt(player.x, player.z);
   if (z === 'fame' || z === 'stairs') pts.push(new THREE.Vector3(15, 5.4, 7), new THREE.Vector3(8, 1.8, 7));
-  if (z === 'hall') pts.push(new THREE.Vector3(0, 1.8, -.5), new THREE.Vector3(-2, 1.8, 5));
+  if (z === 'hall') pts.push(new THREE.Vector3(player.x > 0 ? 2 : -2, 1.8, -.5), new THREE.Vector3(-2, 1.8, 5));
   if (z !== 'morgue') pts.push(new THREE.Vector3(-8.2, 1.8, 7));
   pts.push(pos);
   const curve = new THREE.CatmullRomCurve3(pts, false, 'centripetal');
@@ -1570,22 +1916,26 @@ function updateCamTween(dt) {
   if (k >= 1) {
     const p = tw.curve.getPoint(1);
     player.x = p.x; player.z = p.z; player.y = floorAt(p.x, p.z);
+    player.lastMove = performance.now();
     camTween = null;
     tw.done && tw.done();
   }
 }
 
 // ================================================================
-//  공유 카드: 명패 이미지 PNG
+//  공유 카드: 명패 이미지 PNG (사진 포함)
 // ================================================================
-async function drawShareCard(ex) {
+async function drawShareCard(ex, withPhoto = true) {
   await ensureFonts(exhibitText([ex]));
-  const W = 1080, H = 1350, c = document.createElement('canvas');
+  const src = withPhoto ? photoSrc(ex) : null;
+  let img = null;
+  if (src) { try { img = await new Promise((res, rej) => { const i = new Image(); i.crossOrigin = 'anonymous'; i.onload = () => res(i); i.onerror = rej; i.src = src; }); } catch { img = null; } }
+  const PH = img ? 560 : 0;
+  const W = 1080, H = 1350 + PH, c = document.createElement('canvas');
   c.width = W; c.height = H;
   const g = c.getContext('2d');
   const p = placement.get(ex.id), isFame = p && p.zone === 'fame';
   g.fillStyle = isFame ? '#2a0b12' : '#110f22'; g.fillRect(0, 0, W, H);
-  // 종이 카드
   const x0 = 90, y0 = 110, cw = W - 180, ch = H - 250;
   g.fillStyle = isFame ? '#f6e3a8' : '#f3f0e6'; g.fillRect(x0, y0, cw, ch);
   g.strokeStyle = '#1b1a22'; g.lineWidth = 4; g.strokeRect(x0 + 24, y0 + 24, cw - 48, ch - 48);
@@ -1595,13 +1945,21 @@ async function drawShareCard(ex) {
   g.beginPath(); g.moveTo(x0 + cw, y0); g.lineTo(x0 + cw - 150, y0); g.lineTo(x0 + cw, y0 + 150); g.fill();
   g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillStyle = '#555';
   g.font = `400 30px ${FONT_SERIF}`; g.fillText(`실 패 박 물 관   소 장 품   제 ${p ? p.no : '?'} 호`, W / 2, y0 + 110);
-  g.fillStyle = '#1b1a22'; g.font = `700 40px ${FONT_SERIF}`; g.fillText('故', W / 2, y0 + 180);
+  let top = y0 + 180;
+  if (img) {   // 사진 (비율 유지, 액자 틀)
+    const bw = cw - 200, bh = PH - 60, a = img.naturalWidth / img.naturalHeight;
+    let dw = bw, dh = bw / a; if (dh > bh) { dh = bh; dw = bh * a; }
+    const px = (W - dw) / 2, py = top + (bh - dh) / 2;
+    g.fillStyle = isFame ? '#c9962e' : '#3b2416'; g.fillRect(px - 18, py - 18, dw + 36, dh + 36);
+    g.drawImage(img, px, py, dw, dh);
+    top += PH;
+  }
+  g.fillStyle = '#1b1a22'; g.font = `700 40px ${FONT_SERIF}`; g.fillText('故', W / 2, top);
   g.font = `700 70px ${FONT_SERIF}`;
   const lines = wrapLines(g, ex.title, cw - 170, 3);
-  lines.forEach((l, i) => g.fillText(l, W / 2, y0 + 270 + i * 86));
-  let y = y0 + 270 + (lines.length - 1) * 86 + 70;
+  lines.forEach((l, i) => g.fillText(l, W / 2, top + 90 + i * 86));
+  let y = top + 90 + (lines.length - 1) * 86 + 70;
   g.fillRect(W / 2 - 40, y, 80, 4); y += 64;
-  // 항목: 회색 라벨 + 값 한 줄
   for (const [k, v] of [['향년', ex.age], ['사망 원인', ex.cause], ['유품', ex.relic]]) {
     g.font = `400 30px ${FONT_SERIF}`; const wl = g.measureText(k).width;
     g.font = `400 36px ${FONT_SERIF}`; const wv = Math.min(g.measureText(v).width, cw - 220 - wl);
@@ -1614,7 +1972,6 @@ async function drawShareCard(ex) {
   }
   g.font = `700 40px ${FONT_SERIF}`; g.fillStyle = '#1b1a22';
   wrapLines(g, `“${ex.epitaph}”`, cw - 170, 2).forEach((l, i) => g.fillText(l, W / 2, y + 26 + i * 54));
-  // 도장 / 전당 배지 (카드 아래쪽 여백)
   g.save(); g.translate(x0 + cw - 170, y0 + ch - 150); g.rotate(-.2);
   g.strokeStyle = '#b3242f'; g.lineWidth = 8; g.beginPath(); g.arc(0, 0, 84, 0, Math.PI * 2); g.stroke();
   g.fillStyle = '#b3242f'; g.font = `700 28px ${FONT_SANS}`; g.fillText('공감', 0, -22); g.font = `700 40px ${FONT_SANS}`; g.fillText(`${ex.empathy}명`, 0, 24);
@@ -1629,15 +1986,15 @@ async function drawShareCard(ex) {
   return c;
 }
 async function saveShareCard(ex) {
-  const c = await drawShareCard(ex);
-  c.toBlob(blob => {
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = `실패박물관_${ex.title.replace(/[\\/:*?"<>|\s]+/g, '_').slice(0, 30)}.png`;
-    document.body.append(a); a.click(); a.remove();
-    setTimeout(() => URL.revokeObjectURL(a.href), 4000);
-    toast('명패 이미지를 저장했습니다. 널리 알려 고인을 기려 주세요.');
-  }, 'image/png');
+  let c = await drawShareCard(ex);
+  let blob = await new Promise(res => { try { c.toBlob(res, 'image/png'); } catch { res(null); } });
+  if (!blob) { c = await drawShareCard(ex, false); blob = await new Promise(res => c.toBlob(res, 'image/png')); }   // 사진 CORS 문제 시 사진 없이
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `실패박물관_${ex.title.replace(/[\\/:*?"<>|\s]+/g, '_').slice(0, 30)}.png`;
+  document.body.append(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+  toast('명패 이미지를 저장했습니다. 널리 알려 고인을 기려 주세요.');
 }
 
 // ================================================================
@@ -1719,6 +2076,14 @@ const sfx = (() => {
       const k = clamp(1 - Math.hypot(pos.x - player.x, pos.z - player.z) / 12, 0, 1);
       if (k > 0) note({ type: 'sawtooth', f: 100, f2: 90, dur: .08, vol: .05 * k + .0002, lp: 600 });
     },
+    // 액자가 벽에 걸리는 소리: 툭
+    thud(pos) {
+      if (!ok()) return;
+      const k = pos ? clamp(1 - Math.hypot(pos.x - player.x, pos.z - player.z) / 16, 0, 1) : 1;
+      if (k <= 0) return;
+      note({ f: 150, f2: 55, dur: .18, vol: .28 * k + .0002 });
+      note({ type: 'triangle', f: 520, f2: 300, t: .005, dur: .05, vol: .07 * k + .0002 });
+    },
     // 관장 웅얼웅얼
     mumble(len) {
       if (!ok()) return;
@@ -1737,11 +2102,20 @@ addEventListener('keydown', sfx.init);
 const LINES = {
   enter: [
     '어서 오세요. 오늘도 누군가의 계획이 조용히 숨을 거뒀습니다.',
-    '실패 박물관에 오신 걸 환영합니다. 입장료는 당신의 자존심입니다. 농담이고, 무료입니다.',
-    '조용히 관람해 주세요. 전시품들이 겨우 잠들었거든요.',
-    '처음이세요? 괜찮습니다. 여기 있는 것들도 다 처음엔 의욕이 넘쳤죠.',
+    '조용히 관람해 주세요. 액자들이 겨우 잠들었거든요.',
+    '처음이세요? 괜찮습니다. 여기 걸린 것들도 다 처음엔 의욕이 넘쳤죠.',
     '왼쪽은 울음방, 오른쪽 계단 위는 명예의 전당입니다. 어디로 가셔도 슬픕니다.',
     '저는 이곳 관장입니다. 원래 꿈은 이게 아니었어요. 그래서 여기 있습니다.',
+    '액자가 삐뚤어져 있어도 바로잡지 마세요. 그게 고인의 마지막 자세입니다.',
+  ],
+  // 전시품이 하나도 없을 때
+  empty: [
+    '전시품이 없습니다. 이 정도면 관장이 실패한 겁니다.',
+    '텅 빈 박물관에 오신 걸 환영합니다. 관람 시간은 약 3초입니다.',
+    '아직 아무도 실패를 고백하지 않았어요. 다들 성공한 척하는 중입니다.',
+    '첫 번째 고인 자리가 비어 있습니다. VIP석이에요.',
+    '벽에 못만 박아 놨습니다. 걸 게 없어서요.',
+    '오늘의 전시: 공기. 작가: 관장. 향년: 개관 이후 계속.',
   ],
   registered: [
     '삼가 고인의 명복을 빕니다. …저 이 문장 하루에 백 번 말해요.',
@@ -1749,19 +2123,29 @@ const LINES = {
     '삼가 명복을 빕니다. 향년이 생각보다 짧네요. 괜찮아요, 제 헬스장 회원권은 더 짧았습니다.',
     '삼가 명복을 빕니다. 이렇게 공개적으로 안치하신 용기, 그것만은 살아 있네요.',
     '삼가 명복을 빕니다. 유족 대표로 한 말씀… 아, 본인이시죠. 힘내세요.',
-    '삼가 명복을 빕니다. 공감이 쌓이면 전당에 금으로 모셔 드립니다. 금은 페인트입니다.',
+    '삼가 명복을 빕니다. 공감이 쌓이면 전당에 금액자로 모셔 드립니다. 금은 페인트입니다.',
+  ],
+  firstRegistered: [
+    '삼가 명복을 빕니다. 이 박물관의 첫 번째 고인이십니다. 드디어 관장도 실패에서 벗어났네요.',
+    '삼가 명복을 빕니다. 개관 이래 첫 안치입니다. 관장은 지금 조금 울고 있습니다. 기뻐서요.',
   ],
   fame: [
-    '불멸의 흑역사관입니다. 여기 계신 분들은 실패로 영생을 얻으셨죠.',
-    '쉿, 1위 님이 넘어져 계십니다. 3년째요. 일으켜 드리면 안 됩니다, 작품입니다.',
-    '금색 동상은 공감 수로만 제작됩니다. 돈으로는 안 됩니다. 저도 해봤어요.',
+    '불멸의 흑역사관입니다. 여기 걸린 분들은 실패로 영생을 얻으셨죠.',
+    '쉿, 1위 액자는 원래 삐뚤어져 있습니다. 바로잡으면 안 됩니다, 작품입니다.',
+    '금액자는 공감 수로만 제작됩니다. 돈으로는 안 됩니다. 저도 해봤어요.',
     '(헉헉) 계단보다 제가 먼저 왔습니다. 관장은 어디에나 있습니다.',
     '여기 계신 분들의 공통점이요? 다들 "이번엔 진짜"라고 했습니다.',
-    '바나나 껍질은 사인 추정용 증거물입니다. 치우지 마세요.',
+  ],
+  fameEmpty: [
+    '전당이 비었습니다. 공감 한 번이면 바로 1위입니다. 이렇게 쉬운 명예가 없어요.',
+    '금액자만 걸어 놨습니다. 주인공들은 아직 공감을 못 받았고요.',
+    '(헉헉) 먼저 와 있었는데 모실 분이 없네요. 아래층에서 공감 좀 눌러 주세요.',
+    '공석 다섯 개. 이 박물관에서 유일하게 성공적으로 비어 있는 곳입니다.',
+    '명예 실패자 모집 중입니다. 자격 요건: 공감 1개. 경력 무관.',
   ],
   idle: [
     '…혹시 전시품이신가요? 너무 가만히 계셔서.',
-    '움직이지 않으시면 "의욕 증발" 코너에 모시겠습니다.',
+    '움직이지 않으시면 액자에 넣어 걸어 드리겠습니다.',
     '괜찮아요, 멍때리는 것도 관람입니다. 제 주력 종목이죠.',
     '관람객님? 숨은 쉬고 계시죠? 여긴 박물관이지 안치실이… 아, 안치실도 있구나.',
     '그대로 계시면 명패를 달아 드립니다. "향년: 방금".',
@@ -1777,24 +2161,24 @@ const LINES = {
   lurk: [
     '구경만 하시는 거 다 압니다. 당신에게도 하나쯤 있잖아요. 작심삼일짜리.',
     '우측 상단 "내 실패 전시하기" 버튼, 무료입니다. 부끄러움만 조금 듭니다.',
-    '남의 실패만 보시면 반칙입니다. 하나 기부하고 가세요.',
+    '남의 실패만 보시면 반칙입니다. 하나 기부하고 가세요. 사진도 받습니다.',
     '혹시 올해 다짐, 아직 살아 있나요? …확인해 보세요. 조용히 기다리겠습니다.',
-    '안치실에 빈자리가 있습니다. 누구 자리일까요. 네, 당신 자리요.',
+    '안치실에 빈 액자가 있습니다. 누구 자리일까요. 네, 당신 자리요.',
     '등록하시면 제가 "삼가 명복을 빕니다"를 해 드립니다. 제 특기예요.',
   ],
   hall: [
-    '메인홀입니다. 최신 실패부터 전시합니다. 안쪽으로 갈수록 오래 묵은 실패죠.',
-    '진열장은 만지지 마세요. 이미 충분히 망가졌습니다.',
+    '메인홀입니다. 최신 실패부터 벽을 따라 걸려 있어요. 안쪽일수록 오래 묵은 실패죠.',
+    '액자는 만지지 마세요. 이미 충분히 삐뚤어졌습니다.',
     '형광등이 깜빡이는 건 연출입니다. 교체 예산 확보에 실패했거든요.',
     '(헉헉) 먼저 와 있었습니다. 관장은 어디에나 있습니다.',
-    '가까이 가서 자세히 보시면 공감 버튼이 있습니다. 누르면 고인이 좋아합니다.',
+    '액자를 가까이서 보시면 공감 버튼이 있습니다. 누르면 고인이 좋아합니다.',
   ],
   morgue: [
-    '신규 안치실입니다. 방금 돌아가신 계획들이 모셔져 있어요.',
+    '신규 안치실입니다. 방금 돌아가신 계획들이 걸려 있어요.',
     '여기서는 우셔도 됩니다. 저도 가끔 여기서 웁니다. 월급날에요.',
-    '관 뚜껑은 열지 마세요. 안에 "내일부터"가 들어 있습니다.',
+    '액자 아래 꽃은 조화입니다. 의욕처럼요. 오래가는 척만 하죠.',
     '(헉헉) 먼저 와 있었습니다. 뛰지 마세요, 엄숙한 곳입니다.',
-    '빈 관이 있다면… 네, 예약석입니다.',
+    '빈 액자가 있다면… 네, 예약석입니다.',
   ],
   poke: [
     '저 전시품 아닙니다. 아직은요.',
@@ -1805,11 +2189,19 @@ const LINES = {
   ],
 };
 LINES.lobby = LINES.enter;
+// 상황에 맞는 멘트 풀 (빈 박물관 / 빈 전당 / 첫 고인)
+function linePool(kind) {
+  if (!exhibits.length && ['enter', 'lobby', 'hall', 'morgue', 'fame', 'lurk'].includes(kind)) return LINES.empty;
+  if (kind === 'fame' && !topFive().length) return LINES.fameEmpty;
+  if (kind === 'registered' && exhibits.length === 1) return LINES.firstRegistered;
+  return LINES[kind];
+}
 
 // ================================================================
 //  관장 NPC: 모델 (둥근 머리, 정장, 검은 넥타이)
 // ================================================================
-const NPC_TARGET = { npc: true, id: '__npc', title: '관장' };
+const SKIN = mat(0xf1c9a5), HAIR = mat(0x2a2030);
+const NPC_TARGET ={ npc: true, id: '__npc', title: '관장' };
 const STATIONS = { lobby: [0, 6.55], hall: [-7.3, -1.3], morgue: [-11.2, 10.7], fame: [19.6, 3.4] };
 const npc = { g: null, head: null, torso: null, el: null, zone: 'lobby', speakUntil: 0, lastNear: 0, lastIdle: 0, nextLurk: Infinity, recent: [], yaw: 0 };
 const puffs = [];
@@ -1879,7 +2271,7 @@ function puff(p) {
 function say(kind, { force = false } = {}) {
   const now = performance.now();
   if (!npc.g || (!force && now < npc.speakUntil)) return;
-  const pool = LINES[kind];
+  const pool = linePool(kind);
   if (!pool) return;
   const fresh = pool.filter(l => !npc.recent.includes(l));
   const text = pick(fresh.length ? fresh : pool);
@@ -1923,7 +2315,7 @@ function updateDirector(dt, now) {
   // 가까이 가면 한마디
   if (dist < 3.2 && !speaking && now - npc.lastNear > 18000) { npc.lastNear = now; say(currentZone in LINES ? currentZone : 'enter'); }
   // 오래 가만히 있을 때
-  if (now - player.lastMove > 25000 && now - npc.lastIdle > 25000) { npc.lastIdle = now; say('idle', { force: true }); }
+  if (now - player.lastMove > 25000 && now - npc.lastIdle > 25000) { npc.lastIdle = now; say('idle'); }
   // 등록 안 하고 구경만 오래 할 때
   if (!registeredEver && now > npc.nextLurk) { npc.nextLurk = now + 60000; say('lurk'); }
 }
@@ -1951,9 +2343,9 @@ function setMuteIcon() { $('#btnMute').textContent = sfx.muted ? '🔇' : '🔊'
 function defaultHint() {
   if (hovered === NPC_TARGET) return isTouch ? '관장을 탭하면 말을 겁니다' : '[E] 또는 클릭 — 관장에게 말 걸기';
   if (hovered) return isTouch ? `「${hovered.title}」 — 탭하거나 [자세히 보기]` : `[E] 또는 클릭 — 「${hovered.title}」 자세히 보기`;
-  if (isTouch) return '왼쪽 드래그: 걷기 · 오른쪽 드래그: 둘러보기 · 전시품 탭: 자세히';
-  if (lockFailed) return '드래그해서 둘러보기 · WASD 이동 · 전시품 클릭';
-  return controls.isLocked ? 'WASD 이동 · 전시품을 조준하고 클릭 · Esc 커서 해제' : '화면을 클릭해서 둘러보기 · WASD 이동';
+  if (isTouch) return '왼쪽 드래그: 걷기 · 오른쪽 드래그: 둘러보기 · 액자 탭: 자세히';
+  if (lockFailed) return '드래그해서 둘러보기 · WASD 이동 · 액자 클릭';
+  return controls.isLocked ? 'WASD 이동 · 액자를 조준하고 클릭 · Esc 커서 해제' : '화면을 클릭해서 둘러보기 · WASD 이동';
 }
 function setHint(t) { $('#hint').textContent = t; }
 function toast(html, ms = 4200, cls = '') {
@@ -1968,7 +2360,7 @@ function toast(html, ms = 4200, cls = '') {
 //  루프
 // ================================================================
 const clock = new THREE.Clock();
-let fpsAcc = 0, fpsFrames = 0;
+let fpsAcc = 0, fpsFrames = 0, fpsNow = 0;
 function tick() {
   const dt = Math.min(clock.getDelta(), 0.05);
   const now = performance.now();
@@ -1979,13 +2371,14 @@ function tick() {
     updateHover(now);
   }
   updateAmbient(dt, now);
+  updateFrames(dt, now);
   updateDirector(dt, now);
   updatePuffs(dt);
   // 프레임이 부족하면 해상도를 조금씩 낮춘다 (모바일 30fps 목표)
   fpsAcc += dt; fpsFrames++;
   if (fpsAcc > 2) {
-    const fps = fpsFrames / fpsAcc;
-    if (fps < 32 && pixelRatio > 1) { pixelRatio = Math.max(1, pixelRatio - 0.25); renderer.setPixelRatio(pixelRatio); }
+    fpsNow = fpsFrames / fpsAcc;
+    if (fpsNow < 32 && pixelRatio > 1) { pixelRatio = Math.max(1, pixelRatio - 0.25); renderer.setPixelRatio(pixelRatio); }
     fpsAcc = 0; fpsFrames = 0;
   }
   renderer.render(scene, camera);
@@ -1995,32 +2388,46 @@ function tick() {
 // ================================================================
 //  시작
 // ================================================================
-let visitorNo = 0;
+let visitorNo = 0, initialLoaded = false;
 async function boot() {
-  exhibits = await storeCall('load');
-  if (Store === RemoteStore && !exhibits.length) exhibits = SEEDS.map(e => ({ ...e }));   // 빈 DB여도 박물관이 비어 보이지 않게
-  await ensureFonts(document.querySelector('script[type=module]').textContent + exhibitText(exhibits));
+  await ensureFonts(document.querySelector('script[type=module]').textContent);
   buildLobby();
   buildMorgue();
   buildStairsAndFame();
   buildDirector();
-  layoutAll();
+  // 모드 표시: 로컬 모드면 항상 경고 배너
+  $('#modeBanner').hidden = CONFIGURED;
+  document.body.classList.toggle('has-banner', !CONFIGURED);
+  Net.status = ''; setStatus(CONFIGURED ? 'offline' : 'local');
+  if (CONFIGURED) {
+    try { exhibits = await Remote.load(); setStatus('polling'); Net.lastSync = Date.now(); }
+    catch (e) { console.warn('[실패 박물관] 첫 로딩 실패', e); exhibits = []; setStatus('offline'); startPolling(); }
+  } else exhibits = await LocalStore.load();
+  reindex();
+  await ensureFonts(exhibitText(exhibits));
+  layoutAll({ initial: true });
+  initialLoaded = true;
   setLook(0, -0.05);
   camera.position.set(player.x, player.eye, player.z);
+  // 처음 보는 구역에서 멈칫하지 않도록 정적 텍스처 업로드와 셰이더 컴파일을 로딩 화면에서 미리 끝낸다
+  scene.traverse(o => { const m = o.material; if (m && m.map) renderer.initTexture(m.map); });
+  renderer.compile(scene, camera);
   renderer.setAnimationLoop(tick);
-  try { visitorNo = await Store.visit(); } catch { visitorNo = await LocalStore.visit(); }
-  console.info(`[실패 박물관] 저장소 모드: ${Store.mode === 'remote' ? 'Supabase 공용 DB' : '로컬(localStorage)'}`);
-  $('#visitorNo').textContent = visitorNo.toLocaleString('ko-KR');
-  setVisitorBoard(visitorNo.toLocaleString('ko-KR'));
+  try { visitorNo = CONFIGURED ? await Remote.visit() : await LocalStore.visit(); } catch { visitorNo = 0; }
+  $('#visitorNo').textContent = visitorNo ? visitorNo.toLocaleString('ko-KR') : '?';
+  setVisitorBoard(visitorNo ? visitorNo.toLocaleString('ko-KR') : '?');
   $('#loading').classList.add('done');
   $('#intro').hidden = false;
+  if (CONFIGURED) connectRealtime();
+  console.info(`[실패 박물관] 저장소 모드: ${CONFIGURED ? 'Supabase 공용 DB' : '로컬(localStorage)'} · 전시품 ${exhibits.length}점`);
 }
 // 콘솔 디버깅용 (예: FM.tp(25, 7, -Math.PI/2))
 window.FM = {
-  player, tp(x, z, yaw = 0, pitch = 0) { player.x = x; player.z = z; setLook(yaw, pitch); },
-  get exhibits() { return exhibits; }, get store() { return Store.mode; },
-  get stats() { return { calls: renderer.info.render.calls, tris: renderer.info.render.triangles, pixelRatio }; },
-  async card(id) { return (await drawShareCard(exhibits.find(e => e.id === id))).toDataURL(); },
+  player, tp(x, z, yaw = 0, pitch = 0) { player.x = x; player.z = z; player.lastMove = performance.now(); setLook(yaw, pitch); },
+  get exhibits() { return exhibits; }, get status() { return Net.status; }, get net() { return Net; },
+  get stats() { return { calls: renderer.info.render.calls, tris: renderer.info.render.triangles, textures: renderer.info.memory.textures, pixelRatio, fps: Math.round(fpsNow), frames: frames.size, loaded: [...frames.values()].filter(f => f.loaded).length, photos: [...frames.values()].filter(f => f.photo).length }; },
+  open(id) { openDetail(exIndex.get(id)); }, empathize(id) { return doEmpathy(exIndex.get(id)); },
+  async card(id, withPhoto = true) { return (await drawShareCard(exhibits.find(e => e.id === id), withPhoto)).toDataURL(); },
 };
 
 let firstEntry = true;
@@ -2034,21 +2441,26 @@ $('#btnEnter').addEventListener('click', () => {
   if (firstEntry) { firstEntry = false; onFirstEnter(); }
 });
 function onFirstEnter() {
-  toast(`당신은 <b>${visitorNo.toLocaleString('ko-KR')}</b>번째 방문객입니다. 삼가 조의를 표합니다.`, 5000);
+  if (visitorNo) toast(`당신은 <b>${visitorNo.toLocaleString('ko-KR')}</b>번째 방문객입니다. 삼가 조의를 표합니다.`, 5000);
   director('enter');
 }
 $('#btnHelp').addEventListener('click', () => { unlockPointer(); closeUI(); $('#intro').hidden = false; });
 $('#btnRegister').addEventListener('click', openRegister);
 $('#btnLook').addEventListener('click', interact);
 $('#btnMute').addEventListener('click', () => { sfx.init(); sfx.toggle(); setMuteIcon(); });
+$('#connDot').addEventListener('click', () => toast(STATUS_TEXT[Net.status] || ''));
 setMuteIcon();
 $('#btnEmpathy').addEventListener('click', () => doEmpathy(selected));
 $('#btnShare').addEventListener('click', () => selected && saveShareCard(selected));
+$('#dPhoto').addEventListener('click', () => $('#dPhoto').src && openLightbox($('#dPhoto').src));
+$('#lightbox').addEventListener('click', () => { $('#lightbox').hidden = true; });
 for (const b of document.querySelectorAll('[data-close]')) b.addEventListener('click', closeUI);
 $('#register').addEventListener('click', e => { if (e.target.id === 'register') closeUI(); });
 $('#regForm').addEventListener('submit', submitRegister);
 $('#regForm [name=cause]').addEventListener('change', syncCauseField);
 $('#regForm').addEventListener('input', updateCounts);
+$('#photoInput').addEventListener('change', onPhotoPicked);
+$('#btnPhotoClear').addEventListener('click', () => clearPhoto(true));
 updateCounts();
 boot();
 </script>
