@@ -160,4 +160,6 @@ python3 -m http.server 8000
 - `index.html` — 앱 전체 (설정 · 씬 · 액자 · 동기화 · NPC · 사운드)
 - `schema.sql` — 새 프로젝트용 전체 스키마 (테이블/RLS/RPC/전당 재계산/트리거/pg_cron/Realtime/Storage)
 - `migration_v3.sql` — 운영 중인 v2 DB를 v3로 올리는 마이그레이션 (여러 번 실행 안전)
+- `docs/PROGRESS.md` · `docs/진행과정.docx` — 스크린샷을 포함한 진행과정 문서 (Markdown 원본 / Word). `python3 docs/build_progress.py`로 커밋 기록과 Word 파일을 다시 만듦 (pandoc 필요)
+- `.githooks/pre-push` — 진행과정 문서가 코드보다 오래됐으면 push를 막는 훅. 새로 clone했다면 `git config core.hooksPath .githooks`로 켜기
 - 디버그: 브라우저 콘솔에서 `FM.stats`(draw call·텍스처·fps), `FM.status`(연결 상태), `FM.tp(25, 7, -Math.PI / 2)`(전당 앞으로 이동), `FM.slotState`(슬롯 사용 현황), `FM.lights`(켜진 광원 수)
