@@ -32,6 +32,14 @@ alter table public.exhibits drop constraint if exists exhibits_id_format;
 alter table public.exhibits add constraint exhibits_id_format
   check (id ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$');
 
+-- 전시 슬롯 (벽의 빈 액자 자리). index.html 의 SLOTS 배열 id 와 같은 형식 (예: hall-03, regret-12, annex-004)
+alter table public.exhibits add column if not exists slot_id text;
+alter table public.exhibits drop constraint if exists exhibits_slot_id_format;
+alter table public.exhibits add constraint exhibits_slot_id_format
+  check (slot_id is null or slot_id ~ '^(lobby|hall|regret|cry|lazy|dead|unfin|annex)-[0-9]{2,3}$');
+-- 같은 슬롯에 두 작품이 동시에 걸리지 않게 (동시 등록 시 늦은 쪽은 409 → 앱이 옆 빈 액자로 재시도)
+create unique index if not exists exhibits_slot_active_uidx on public.exhibits (slot_id) where slot_id is not null;
+
 create index if not exists exhibits_created_at_idx on public.exhibits (created_at desc);
 create index if not exists exhibits_empathy_idx    on public.exhibits (empathy desc, created_at);
 
@@ -50,7 +58,7 @@ create policy exhibits_insert on public.exhibits
 -- 컬럼 권한: 클라이언트는 내용 필드만 넣을 수 있고 empathy · created_at 은 기본값이 강제된다.
 revoke insert, update, delete on public.exhibits from anon, authenticated;
 grant select on public.exhibits to anon, authenticated;
-grant insert (id, title, cause, age, relic, epitaph, photo_url) on public.exhibits to anon, authenticated;
+grant insert (id, title, cause, age, relic, epitaph, photo_url, slot_id) on public.exhibits to anon, authenticated;
 
 -- ---------- 3. 공감 +1 은 이 RPC 로만 ----------
 create or replace function public.increment_empathy(exhibit_id text)
@@ -66,6 +74,31 @@ as $$
 $$;
 revoke all on function public.increment_empathy(text) from public;
 grant execute on function public.increment_empathy(text) to anon, authenticated;
+
+-- ---------- 3-1. 슬롯이 없는 작품(예전 작품 등)에 빈 슬롯 기록: slot_id 가 비어 있을 때만 한 번 ----------
+create or replace function public.claim_slot(exhibit_id text, slot text)
+returns text
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare result text;
+begin
+  begin
+    update public.exhibits set slot_id = slot
+     where id = exhibit_id and slot_id is null
+    returning slot_id into result;
+  exception when unique_violation then
+    result := null;   -- 그사이 다른 작품이 그 자리를 차지함
+  end;
+  if result is null then
+    select e.slot_id into result from public.exhibits e where e.id = exhibit_id;
+  end if;
+  return result;
+end;
+$$;
+revoke all on function public.claim_slot(text, text) from public;
+grant execute on function public.claim_slot(text, text) to anon, authenticated;
 
 -- ---------- 4. 방문객 카운터 ("당신은 N번째 방문객입니다") ----------
 create table if not exists public.visit_counter (

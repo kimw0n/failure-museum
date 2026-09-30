@@ -100,6 +100,8 @@
   .form .count { position: absolute; right: 2px; top: 0; font-size: 11px; color: #888; }
   .form .opt { color: #999; }
   .err { color: #b3242f; font-size: 13px; min-height: 18px; margin: 2px 0 10px; font-family: var(--sans); }
+  .slot-note { font: 13px var(--sans); color: #3a3440; background: #e8e2cf; padding: 7px 10px; margin: 0 0 8px; text-align: left; }
+  .slot-note b { color: #8a1b24; }
   .row { display: flex; gap: 8px; } .row > * { flex: 1; margin-top: 0; }
   @media (min-width: 641px) { body.panel-open #toasts { left: 16px; transform: none; width: min(460px, calc(100% - 430px)); } }
   @media (max-width: 640px) {
@@ -263,6 +265,7 @@
       <div id="photoPreview" hidden><img alt="첨부한 사진 미리보기"><button type="button" class="btn-ghost" id="btnPhotoClear">사진 지우기</button></div>
       <p class="photo-msg" id="photoMsg"></p>
     </div>
+    <p class="slot-note" id="regSlot"></p>
     <p class="err" id="regErr"></p>
     <div class="row">
       <button type="button" class="btn-ghost" data-close>그냥 구경만 할게요</button>
@@ -1346,6 +1349,92 @@ function makeEmptyFrame(kind, text, sub = '') {
   return g;
 }
 
+// ---------- 전시 슬롯의 빈 액자: 회색 캔버스 + 금이 간 프레임 + "여기에 전시하세요" ----------
+//  슬롯이 몇 개든 InstancedMesh 두 개(프레임, 캔버스)로 그린다. 작품이 걸린 슬롯은 인스턴스를 숨긴다.
+const SLOT_CAP = 400;
+let slotList = [...SLOTS];
+const slotTargets = new Map();   // 슬롯 id → 조준 대상 객체 (hovered 비교용으로 같은 객체 유지)
+const slotTarget = sl => {
+  if (!slotTargets.has(sl.id)) slotTargets.set(sl.id, { slotTarget: true, id: sl.id, slot: sl, title: '빈 액자' });
+  return slotTargets.get(sl.id);
+};
+function crackedFrameGeometry() {
+  const border = new THREE.Color(0x6b6158), crack = new THREE.Color(0x2a2522), back = new THREE.Color(0x3a3634);
+  const b = .09, d = .075, fw = FRAME.w, fh = FRAME.h, gap = .05;
+  const cut = fw * .18;   // 윗변이 이 지점에서 금 가서 살짝 어긋남
+  const parts = [
+    [new THREE.BoxGeometry(fw, fh, .03).translate(0, 0, .015), back],
+    [new THREE.BoxGeometry(fw / 2 + cut - gap / 2, b, d).translate(-fw / 4 + cut / 2 - gap / 4, fh / 2 - b / 2, d / 2), border],
+    [new THREE.BoxGeometry(fw / 2 - cut - gap / 2, b, d).rotateZ(-.06).translate(fw / 4 + cut / 2 + gap / 4, fh / 2 - b / 2 - .012, d / 2 + .004), border],
+    [new THREE.BoxGeometry(fw, b, d).translate(0, -fh / 2 + b / 2, d / 2), border],
+    [new THREE.BoxGeometry(b, fh - 2 * b, d).translate(-fw / 2 + b / 2, 0, d / 2), border],
+    [new THREE.BoxGeometry(b, fh - 2 * b, d).translate(fw / 2 - b / 2, 0, d / 2), border],
+    [new THREE.BoxGeometry(gap * .6, b * 1.1, d * .6).translate(cut - gap * .1, fh / 2 - b / 2, d / 2 + .02), crack],
+  ].map(([g, c]) => {
+    const n = g.attributes.position.count, col = new Float32Array(n * 3);
+    for (let i = 0; i < n; i++) c.toArray(col, i * 3);
+    g.setAttribute('color', new THREE.BufferAttribute(col, 3));
+    return g;
+  });
+  const merged = mergeGeometries(parts);
+  parts.forEach(p => p.dispose());
+  return merged;
+}
+const emptyCanvasMat = new THREE.MeshLambertMaterial({ map: canvasTexture(330, 285, (c, W, H) => {
+  c.fillStyle = '#76747a'; c.fillRect(0, 0, W, H);
+  for (let i = 0; i < 260; i++) { c.fillStyle = `rgba(${Math.random() < .5 ? '255,255,255' : '0,0,0'},.05)`; c.fillRect(Math.random() * W, Math.random() * H, 3, 3); }
+  c.strokeStyle = 'rgba(30,26,24,.55)'; c.lineWidth = 2;   // 캔버스 모서리 금
+  c.beginPath(); c.moveTo(W * .64, 0); c.lineTo(W * .6, H * .08); c.lineTo(W * .66, H * .15); c.lineTo(W * .62, H * .22); c.stroke();
+  c.fillStyle = 'rgba(245,240,230,.8)'; c.textAlign = 'center'; c.textBaseline = 'middle';
+  c.font = `400 ${H * .075}px ${FONT_SERIF}`; c.fillText('여기에 전시하세요', W / 2, H * .82);
+}) });
+const emptyFrames = new THREE.InstancedMesh(crackedFrameGeometry(), new THREE.MeshLambertMaterial({ vertexColors: true }), SLOT_CAP);
+const emptyPics = new THREE.InstancedMesh(new THREE.PlaneGeometry(PIC.w, PIC.h).translate(0, 0, .034), emptyCanvasMat, SLOT_CAP);
+for (const im of [emptyFrames, emptyPics]) { im.frustumCulled = false; im.count = 0; scene.add(im); }
+emptyFrames.userData.slotAt = i => slotList[i] ? slotTarget(slotList[i]) : null;
+const _se = new THREE.Euler(0, 0, 0, 'YXZ'), _sq = new THREE.Quaternion(), _sp = new THREE.Vector3(), _ss = new THREE.Vector3();
+const HIDDEN = new THREE.Matrix4().makeScale(1e-4, 1e-4, 1e-4).setPosition(0, -999, 0);
+function slotMatrix(sl, m = new THREE.Matrix4()) {
+  _se.set(0, sl.rotY, tiltFor(sl.id) * .8);
+  return m.compose(_sp.set(sl.x, sl.y, sl.z), _sq.setFromEuler(_se), _ss.setScalar(sl.s || 1));
+}
+const occupiedSlots = new Map();   // 슬롯 id → 전시품 (전당 제외)
+function updateEmptySlots() {
+  slotList.forEach((sl, i) => {
+    const m = occupiedSlots.has(sl.id) ? HIDDEN : slotMatrix(sl, _m4);
+    emptyFrames.setMatrixAt(i, m); emptyPics.setMatrixAt(i, m);
+  });
+  emptyFrames.count = emptyPics.count = slotList.length;
+  emptyFrames.instanceMatrix.needsUpdate = emptyPics.instanceMatrix.needsUpdate = true;
+}
+// 조준 하이라이트(금색 테두리)와 "전시할 자리로 선택됨" 표시(붉은 테두리)
+function outlineGeometry() {
+  const w = FRAME.w + .16, h = FRAME.h + .16, b = .05;
+  return mergeGeometries([
+    new THREE.BoxGeometry(w, b, .02).translate(0, h / 2, 0), new THREE.BoxGeometry(w, b, .02).translate(0, -h / 2, 0),
+    new THREE.BoxGeometry(b, h, .02).translate(-w / 2, 0, 0), new THREE.BoxGeometry(b, h, .02).translate(w / 2, 0, 0),
+  ]);
+}
+const hoverHL = new THREE.Mesh(outlineGeometry(), new THREE.MeshBasicMaterial({ color: 0xffd27a, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending }));
+const placeHL = new THREE.Mesh(outlineGeometry(), new THREE.MeshBasicMaterial({ color: 0xff5a4a, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending }));
+hoverHL.visible = placeHL.visible = false;
+scene.add(hoverHL, placeHL);
+function putOutline(o, sl) {
+  if (!sl) { o.visible = false; return; }
+  o.position.set(sl.x + Math.sin(sl.rotY) * .07, sl.y, sl.z + Math.cos(sl.rotY) * .07);
+  o.rotation.set(0, sl.rotY, 0); o.scale.setScalar(sl.s || 1); o.visible = true;
+}
+function nearestFreeSlot(from, exclude = new Set()) {
+  let best = null, bd = Infinity;
+  for (const sl of slotList) {
+    if (occupiedSlots.has(sl.id) || exclude.has(sl.id)) continue;
+    const d = Math.hypot(sl.x - from.x, sl.z - from.z) + (from.zone && sl.zone !== from.zone ? 6 : 0);
+    if (d < bd) { bd = d; best = sl; }
+  }
+  return best;
+}
+const slotFree = id => !!id && SLOT.has(id) && !occupiedSlots.has(id);
+
 // ---------- 캔버스 그리기 ----------
 function drawTextCard(c, W, H, ex) {
   const st = causeStyle(ex.cause);
@@ -1536,6 +1625,8 @@ function easeOutBounce(x) {
   return n * (x -= 2.625 / d) * x + .984375;
 }
 function updateFrames(dt, now) {
+  hoverHL.material.opacity = .55 + Math.sin(now * .006) * .35;
+  placeHL.material.opacity = .6 + Math.sin(now * .01) * .4;
   for (const f of frames.values()) {
     f.group.visible = visibleZones.has(f.zone);
     if (f.anim) {   // 살짝 떨어지며 걸리는 애니메이션
@@ -1572,15 +1663,46 @@ const byNewest = (a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt);
 function topFive(list = exhibits) { return list.filter(e => e.empathy >= FAME_MIN).sort(byRank).slice(0, 5); }
 function reindex() { exIndex.clear(); for (const e of exhibits) exIndex.set(e.id, e); }
 
+// 슬롯 배치: 각 작품은 자기 slot_id 자리에. slot_id가 없거나(예전 작품) 자리가 겹치면 가장 가까운 빈 슬롯으로.
+//  모든 방문자가 같은 데이터로 같은 결과를 얻도록 결정적으로 계산한다 (오래된 작품이 우선).
+//  전당에 오른 작품의 원래 슬롯은 빈 액자로 돌아가고, 밀려나면 원래 자리(비었으면) 또는 가장 가까운 빈 자리로 복귀.
 function layoutAll({ animate = new Set(), initial = false } = {}) {
-  const fame = topFive();
+  const live = exhibits.filter(e => !isExpired(e));
+  const fame = hallMembers(live);
   const fameIds = new Set(fame.map(e => e.id));
-  const rest = exhibits.filter(e => !fameIds.has(e.id)).sort(byNewest);
+  const rest = live.filter(e => !fameIds.has(e.id)).sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt) || (a.id < b.id ? -1 : 1));
+  // 별관: 이미 쓰는 별관 번호까지 + 빈 자리가 늘 2개 이상 남도록 4칸씩 늘림
+  let maxAnnex = -1;
+  for (const e of rest) if (/^annex-\d+$/.test(e.slotId || '')) maxAnnex = Math.max(maxAnnex, parseInt(e.slotId.slice(6), 10) - 1);
+  const need = rest.length + 2 - STATIC_SLOT_COUNT;
+  const annexCount = Math.min(SLOT_CAP - STATIC_SLOT_COUNT, Math.max(maxAnnex + 1, need > 0 ? Math.ceil(need / 4) * 4 : 0));
+  slotList = [...SLOTS];
+  for (let k = 0; k < annexCount; k++) slotList.push(annexSlot(k));
+  const inList = new Set(slotList.map(sl => sl.id));
+  ensureAnnex(annexLenFor(annexCount));
+  occupiedSlots.clear();
+  const unplaced = [];
+  for (const e of rest) {
+    if (e.slotId && inList.has(e.slotId) && !occupiedSlots.has(e.slotId)) occupiedSlots.set(e.slotId, e);
+    else unplaced.push(e);
+  }
+  for (const e of unplaced) {
+    const home = SLOT.get(e.slotId) || SLOT.get(e.homeSlot) || { x: 0, z: -12, zone: 'hall' };
+    const sl = nearestFreeSlot(home);
+    if (!sl) continue;
+    occupiedSlots.set(sl.id, e);
+    if (!e.slotId && !e.pending) claimSlotLater(e, sl.id);
+  }
   const want = new Map();
   fame.forEach((e, i) => want.set(e.id, { style: 'fame', rank: i, zone: 'fame', slot: FAME_SLOTS[i] }));
-  rest.slice(0, SLOTS.length).forEach((e, i) => want.set(e.id, { style: 'normal', rank: -1, zone: SLOTS[i].zone, slot: SLOTS[i] }));
+  for (const [id, e] of occupiedSlots) { const sl = SLOT.get(id); want.set(e.id, { style: 'normal', rank: -1, zone: sl.zone, slot: sl }); }
   applyLayout(want, { animate, initial });
+  updateEmptySlots();
+  if (placing && !slotFree(placing)) onPlacingTaken();
 }
+// 전당 = 공감 1 이상 상위 5 (DB가 in_hall을 관리하면 그 값을 따른다 — 4단계)
+function hallMembers(list) { return topFive(list); }
+function isExpired() { return false; }
 function applyLayout(want, { animate, initial }) {
   for (const [id, f] of frames) if (!want.has(id)) { destroyFrame(f); frames.delete(id); }
   for (const [id, w] of want) {
@@ -1866,9 +1988,12 @@ function safePhotoUrl(u) {
   if (CONFIGURED) return u.startsWith(PHOTO_PREFIX) ? u : null;   // 우리 버킷 사진만 표시
   return u.startsWith('data:image/') ? u : null;
 }
+const SLOT_ID_RE = /^(lobby|hall|regret|cry|lazy|dead|unfin|annex)-\d{2,3}$/;
 function fromRow(r) {
+  const sid = r.slot_id ?? r.slotId ?? null;
   return { id: String(r.id), title: r.title, cause: r.cause, age: r.age, relic: r.relic, epitaph: r.epitaph,
-    empathy: r.empathy | 0, createdAt: r.created_at || r.createdAt, photoUrl: safePhotoUrl(r.photo_url ?? r.photoUrl) };
+    empathy: r.empathy | 0, createdAt: r.created_at || r.createdAt, photoUrl: safePhotoUrl(r.photo_url ?? r.photoUrl),
+    slotId: typeof sid === 'string' && SLOT_ID_RE.test(sid) ? sid : null };
 }
 
 // ---------- 로컬 모드 ----------
@@ -1880,7 +2005,7 @@ const LocalStore = {
   },
   async add(ex) {
     const d = this.db();
-    d.added.push({ id: ex.id, title: ex.title, cause: ex.cause, age: ex.age, relic: ex.relic, epitaph: ex.epitaph, empathy: 0, createdAt: ex.createdAt, photoUrl: ex.photoUrl || null });
+    d.added.push({ id: ex.id, title: ex.title, cause: ex.cause, age: ex.age, relic: ex.relic, epitaph: ex.epitaph, empathy: 0, createdAt: ex.createdAt, photoUrl: ex.photoUrl || null, slotId: ex.slotId || null });
     if (!LS.set('fm_local_db', d)) throw new Error('quota');
   },
   async empathize(id) {
@@ -1908,7 +2033,20 @@ async function sbFetch(path, opts = {}, timeout = 8000) {
     return text ? JSON.parse(text) : null;
   } finally { clearTimeout(timer); }
 }
+// DB가 마이그레이션(v3: slot_id · in_hall · expires_at)을 마쳤는지. 아니면 예전 방식으로 동작(슬롯은 화면에서만 계산).
+const isSlotConflict = e => /\b409\b/.test(e.message) && /23505|slot/.test(e.message);
 const Remote = {
+  v3: false,
+  async detect() {
+    try { await sbFetch('/rest/v1/exhibits?select=id,slot_id,in_hall,expires_at&limit=1'); this.v3 = true; }
+    catch (e) {
+      if (/Supabase 400/.test(e.message)) { this.v3 = false; console.warn('[실패 박물관] DB가 아직 v3 마이그레이션 전입니다 → 예전 방식으로 동작 (migration_v3.sql 실행 필요)'); }
+      else throw e;
+    }
+  },
+  async claimSlot(id, slot) {
+    return sbFetch('/rest/v1/rpc/claim_slot', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ exhibit_id: id, slot }) });
+  },
   async load() {
     // 최신 300개 + 공감 상위 10개 (오래된 전당 작품도 빠지지 않게)
     const [recent, top] = await Promise.all([
@@ -1921,6 +2059,7 @@ const Remote = {
   },
   async insert(ex) {
     const body = { id: ex.id, title: ex.title, cause: ex.cause, age: ex.age, relic: ex.relic, epitaph: ex.epitaph, photo_url: ex.photoUrl || null };
+    if (this.v3) body.slot_id = ex.slotId;
     const rows = await sbFetch('/rest/v1/exhibits', { method: 'POST', headers: { 'Content-Type': 'application/json', Prefer: 'return=representation' }, body: JSON.stringify(body) });
     return fromRow(rows[0]);
   },
@@ -2007,6 +2146,19 @@ document.addEventListener('visibilitychange', () => { if (!document.hidden && CO
 addEventListener('online', () => CONFIGURED && syncOnce());
 addEventListener('offline', () => CONFIGURED && setStatus('offline'));
 
+// slot_id가 없는 작품(마이그레이션 전 작품, 전당에서 밀려났는데 원래 자리가 찬 작품)은
+//  화면에서 계산한 가장 가까운 빈 슬롯을 DB에 한 번 기록한다 (먼저 요청한 방문자 것만 반영, 나머지는 무시됨)
+const claimed = new Set();
+function claimSlotLater(e, slotId) {
+  if (!CONFIGURED || !Remote.v3 || claimed.has(e.id)) return;
+  claimed.add(e.id);
+  setTimeout(async () => {
+    if (e.slotId || !exIndex.has(e.id)) return;
+    try { const sid = await Remote.claimSlot(e.id, slotId); if (typeof sid === 'string' && sid !== e.slotId) { e.slotId = sid; scheduleLayout(); } }
+    catch (err) { console.warn('[실패 박물관] 슬롯 기록 실패', err); }
+  }, 400 + Math.random() * 2500);
+}
+
 // 서버/실시간 데이터 병합 (id 기준 → 낙관적 반영분과 중복 없음)
 const pendingEmp = new Set();
 let pendingLayout = null;
@@ -2018,12 +2170,16 @@ function mergeRows(rows, { animateNew = false } = {}) {
     const emp = pendingEmp.has(r.id) ? Math.max(r.empathy, e.empathy) : r.empathy;
     if (emp !== e.empathy) { scheduleLayout(); e.empathy = emp; }
     if (r.photoUrl && e.photoUrl !== r.photoUrl) e.photoUrl = r.photoUrl;
+    if (Remote.v3 && !e.pending && r.slotId !== e.slotId) { if (e.slotId && !r.slotId) e.homeSlot = e.slotId; e.slotId = r.slotId; scheduleLayout(); }
     if (e.pending) { e.pending = false; e.createdAt = r.createdAt || e.createdAt; }
   }
   if (fresh.length) {
     ensureFonts(exhibitText(fresh));
     scheduleLayout(animateNew ? fresh.map(e => e.id) : []);
-    if (initialLoaded) fresh.filter(e => !mine.created.has(e.id)).slice(0, 2).forEach(e => toast(`새 고인 도착: 故「${esc(e.title)}」 — 신규 안치실`, 3800));
+    if (initialLoaded) fresh.filter(e => !mine.created.has(e.id)).slice(0, 2).forEach(e => {
+      const sl = SLOT.get(e.slotId);
+      toast(`새 고인 도착: 故「${esc(e.title)}」${sl ? ' — ' + esc(ZONES[sl.zone].name.split(' · ')[0]) : ''}`, 3800);
+    });
   }
 }
 // 여러 이벤트가 몰려도 한 번만 재배치하고, 그 사이 순위 변화를 속보로 알린다
@@ -2071,6 +2227,7 @@ let hitList = [], hovered = null, lastRay = 0, uiOpen = null, selected = null, c
 // 벽(InstancedMesh)도 함께 검사해서 벽 너머의 액자는 집히지 않게 한다
 function collectHits() {
   hitList = [...frames.values()].map(f => f.fm);
+  hitList.push(emptyFrames);
   if (npc.hit) hitList.push(npc.hit);
   world.traverse(o => { if (o.isInstancedMesh && o.userData.wall) hitList.push(o); });
 }
@@ -2082,6 +2239,7 @@ function pickAt(nx, ny, far) {
     for (let o = h.object; o; o = o.parent) if (!o.visible) { shown = false; break; }
     if (!shown && !h.object.userData.exhibit?.npc) continue;
     if (h.object.userData.wall) return null;
+    if (h.object.userData.slotAt) return h.distance <= 4 ? h.object.userData.slotAt(h.instanceId) : null;   // 빈 액자는 4m 이내
     return h.object.userData.exhibit || null;
   }
   return null;
@@ -2094,10 +2252,16 @@ function updateHover(now) {
   hovered = ex;
   $('#crosshair').classList.toggle('on', !!ex);
   $('#btnLook').hidden = !(ex && isTouch);
-  $('#btnLook').textContent = ex === NPC_TARGET ? '말 걸기' : '자세히 보기';
+  $('#btnLook').textContent = ex === NPC_TARGET ? '말 걸기' : ex && ex.slotTarget ? '여기에 전시하기' : '자세히 보기';
+  putOutline(hoverHL, ex && ex.slotTarget ? ex.slot : null);
   setHint(defaultHint());
 }
-function interact() { if (hovered && !uiOpen) openDetail(hovered); }
+// E / 클릭: 조준한 대상과 상호작용. 전시 위치를 골라 둔 상태에서 허공에 E를 누르면 등록 창을 다시 연다.
+function interact() {
+  if (uiOpen) return;
+  if (hovered) openDetail(hovered);
+  else if (placing) openRegister({ slotId: placing });
+}
 function onTap(x, y) {
   if (uiOpen) return;
   const ex = pickAt(x / innerWidth * 2 - 1, -(y / innerHeight) * 2 + 1, 8);
@@ -2106,6 +2270,7 @@ function onTap(x, y) {
 
 function openDetail(ex) {
   if (ex === NPC_TARGET) { say('poke', { force: true }); return; }
+  if (ex.slotTarget) { openRegister({ slotId: ex.id }); return; }
   selected = ex; uiOpen = 'detail';
   document.body.classList.add('panel-open');
   unlockPointer();
@@ -2142,6 +2307,23 @@ function closeUI() {
   syncBackBtn();
 }
 
+// ---------- 전시 위치 선택(배치 모드): 빈 액자를 조준하고 E → 그 자리를 붉은 테두리로 표시 ----------
+let placing = null;   // 선택한 슬롯 id
+function setPlacing(id) {
+  placing = id;
+  putOutline(placeHL, id ? SLOT.get(id) : null);
+  setHint(defaultHint()); syncBackBtn();
+}
+function cancelPlacing() { setPlacing(null); }
+// 고른 자리를 다른 방문자가 먼저 차지했을 때
+function onPlacingTaken() {
+  const taken = placing;
+  toast('방금 다른 분이 먼저 전시했습니다. 다른 빈 액자를 고르거나, 그대로 안치하면 가장 가까운 빈 액자에 걸립니다.', 5500);
+  const alt = nearestFreeSlot(SLOT.get(taken));
+  setPlacing(alt ? alt.id : null);
+  if (uiOpen === 'register') describeRegisterSlot();
+}
+
 // ---------- 뒤로가기: 위에서부터 하나만 닫고 끝 ----------
 //  (사진 크게 보기) → 상세 패널 → 등록 모달(작성 중이면 확인) → 전시 위치 선택 → 도움말·설정·확대 미니맵 → 없으면 아무 일도 안 함
 const helpOpen = () => started && !$('#intro').hidden;
@@ -2151,6 +2333,7 @@ function backTarget() {
   if (!$('#lightbox').hidden) return 'lightbox';
   if (uiOpen === 'detail') return 'detail';
   if (uiOpen === 'register') return 'register';
+  if (placing) return 'placing';
   if (overlays.some(o => o.isOpen())) return 'overlay';
   return null;
 }
@@ -2160,6 +2343,7 @@ function goBack({ relock = false } = {}) {
   if (t === 'lightbox') $('#lightbox').hidden = true;
   else if (t === 'detail') closeUI();
   else if (t === 'register') { if (!closeRegister()) return false; }
+  else if (t === 'placing') cancelPlacing();
   else overlays.find(o => o.isOpen()).close();
   syncBackBtn();
   // Q(사용자 입력)로 마지막 창을 닫았고, 창을 열기 전에 시점 고정 상태였다면 다시 고정 (시야 각도는 그대로)
@@ -2301,14 +2485,21 @@ const blobToDataURL = b => new Promise((res, rej) => { const r = new FileReader(
 //  등록: 즉시 안치(낙관적) → 사진 업로드 → DB insert → 실패하면 되돌리고 폼을 다시 연다
 // ================================================================
 let registeredEver = mine.created.size > 0;
-function openRegister() {
+// slotId가 있으면 조준한 빈 액자에, 없으면(상단 버튼) 안치하는 순간 가장 가까운 빈 액자에 건다
+function openRegister({ slotId = null } = {}) {
   unlockPointer();
   closeUI();
+  if (slotId) setPlacing(slotId);
   uiOpen = 'register';
+  describeRegisterSlot();
   $('#regErr').textContent = '';
   $('#register').hidden = false;
   syncBackBtn();
   if (!isTouch) setTimeout(() => $('#regForm [name=title]').focus(), 50);
+}
+function describeRegisterSlot() {
+  const sl = placing && SLOT.get(placing);
+  $('#regSlot').innerHTML = sl ? `전시 위치: <b>${esc(ZONES[sl.zone].name.split(' · ')[0])}</b>의 선택한 빈 액자` : '전시 위치: 지금 서 있는 곳에서 <b>가장 가까운 빈 액자</b>에 자동으로 걸립니다';
 }
 function formValues(form) {
   const f = new FormData(form);
@@ -2328,11 +2519,19 @@ async function submitRegister(e) {
   const last = LS.get('fm_last_reg', 0);
   if (Date.now() - last < 30000) return err.textContent = `방금 안치하셨어요. ${Math.ceil((30000 - (Date.now() - last)) / 1000)}초만 묵념하고 다시 와 주세요.`;
   const photo = pendingPhoto;
+  // 전시할 슬롯: 고른 자리(비어 있으면) → 아니면 고른 자리 또는 내 위치에서 가장 가까운 빈 액자
+  let slot = slotFree(placing) ? SLOT.get(placing) : null;
+  if (!slot) {
+    if (placing) toast('방금 다른 분이 먼저 전시했습니다. 가장 가까운 빈 액자에 모십니다.', 4500);
+    slot = nearestFreeSlot(placing ? SLOT.get(placing) : { x: camera.position.x, z: camera.position.z, zone: currentZone });
+  }
+  if (!slot) return err.textContent = '빈 액자를 찾지 못했어요. 잠시 후 다시 시도해 주세요.';
   const ex = {
     id: uuid(), title: d.title, cause: d.cause, age: d.age,
     relic: d.relic || '없음 (빈손으로 감)', epitaph: d.epitaph || '고인은 말이 없다',
-    empathy: 0, createdAt: new Date().toISOString(), photoUrl: null, localPhoto: photo ? photo.url : null, pending: true,
+    empathy: 0, createdAt: new Date().toISOString(), photoUrl: null, localPhoto: photo ? photo.url : null, pending: true, slotId: slot.id,
   };
+  setPlacing(null);
   // 1) 낙관적 반영: 바로 안치실 벽에 걸고 카메라 이동
   exhibits.push(ex); exIndex.set(ex.id, ex);
   mine.created.add(ex.id); saveMine();
@@ -2358,8 +2557,21 @@ async function submitRegister(e) {
         try { ex.photoUrl = await Remote.uploadPhoto(ex.id, photo.blob); }
         catch (upErr) { upErr.photo = true; throw upErr; }
       }
-      const row = await Remote.insert(ex);
-      mergeRows([row]);
+      // 같은 슬롯에 동시에 두 명이 걸면 DB 부분 유니크 인덱스가 한쪽을 거절 → 가장 가까운 빈 액자로 옮겨 다시 시도
+      const lost = new Set();
+      for (let attempt = 0; ; attempt++) {
+        try { mergeRows([await Remote.insert(ex)]); break; }
+        catch (insErr) {
+          if (!isSlotConflict(insErr) || attempt >= 4) throw insErr;
+          lost.add(ex.slotId);
+          const alt = nearestFreeSlot(SLOT.get(ex.slotId), lost);
+          if (!alt) throw insErr;
+          toast('방금 다른 분이 먼저 전시했습니다. 바로 옆 빈 액자로 옮겨 걸었습니다.', 5000);
+          ex.slotId = alt.id;
+          layoutAll({ animate: new Set([ex.id]) });
+          const v = viewPointOf(alt); if (!camTween) flyTo(v.pos, v.look);
+        }
+      }
     } else {
       if (photo) {
         try { ex.photoUrl = await blobToDataURL(photo.blob); await LocalStore.add(ex); }
@@ -2377,7 +2589,7 @@ async function submitRegister(e) {
     LS.set('fm_last_reg', 0);
     layoutAll();
     if (photo) pendingPhoto = photo;
-    openRegister();
+    openRegister({ slotId: slotFree(ex.slotId) ? ex.slotId : null });
     $('#regErr').textContent = e2.photo
       ? '사진 업로드에 실패했어요. 다시 시도하거나 「사진 지우기」 후 사진 없이 등록해 주세요.'
       : '서버에 저장하지 못했어요. 네트워크를 확인하고 다시 눌러 주세요. (입력한 내용은 그대로 있어요)';
@@ -2941,7 +3153,9 @@ $('#btnMap').addEventListener('click', () => setMapCollapsed(false));
 
 function defaultHint() {
   if (hovered === NPC_TARGET) return isTouch ? '관장을 탭하면 말을 겁니다' : '[E] 또는 클릭 — 관장에게 말 걸기';
+  if (hovered && hovered.slotTarget) return isTouch ? '빈 액자 — 탭하거나 [여기에 전시하기]' : '[E] 여기에 전시하기';
   if (hovered) return isTouch ? `「${hovered.title}」 — 탭하거나 [자세히 보기]` : `[E] 또는 클릭 — 「${hovered.title}」 자세히 보기`;
+  if (placing) return isTouch ? '붉은 테두리 빈 액자에 전시 예정 · 다른 빈 액자를 탭하면 변경 · ✕ 취소' : '붉은 테두리 = 전시할 자리 · [E] 작성 계속 · 다른 빈 액자 조준 후 [E]로 변경 · [Q] 취소';
   if (isTouch) return '왼쪽 드래그: 걷기 · 오른쪽 드래그: 둘러보기 · 액자 탭: 자세히';
   if (lockFailed) return '드래그해서 둘러보기 · WASD 이동 · 액자 클릭';
   return controls.isLocked ? 'WASD 이동 · 액자를 조준하고 클릭 · Esc 커서 해제' : '화면을 클릭해서 둘러보기 · WASD 이동';
@@ -3000,7 +3214,7 @@ async function boot() {
   document.body.classList.toggle('has-banner', !CONFIGURED);
   Net.status = ''; setStatus(CONFIGURED ? 'offline' : 'local');
   if (CONFIGURED) {
-    try { exhibits = await Remote.load(); setStatus('polling'); Net.lastSync = Date.now(); }
+    try { await Remote.detect(); exhibits = await Remote.load(); setStatus('polling'); Net.lastSync = Date.now(); }
     catch (e) { console.warn('[실패 박물관] 첫 로딩 실패', e); exhibits = []; setStatus('offline'); startPolling(); }
   } else exhibits = await LocalStore.load();
   reindex();
@@ -3030,6 +3244,10 @@ window.FM = {
   blocked: (x, z, r = player.radius) => blocked(x, z, r), zoneAt: (x, z) => zoneAt(x, z), floorAt: (x, z) => floorAt(x, z),
   get zones() { return ZONES; }, get slots() { return SLOTS; }, get visibleZones() { return [...visibleZones]; }, get currentZone() { return currentZone; },
   get lights() { return { zone: zonePool.active, total: (() => { let n = 0; scene.traverse(o => { if (o.isLight && o.intensity > 0.001 && o.visible) n++; }); return n; })() }; },
+  get slotState() { return { total: slotList.length, occupied: occupiedSlots.size, free: slotList.length - occupiedSlots.size, placing, v3: Remote.v3, annexLen, byExhibit: Object.fromEntries([...occupiedSlots].map(([sid, e]) => [e.id, sid])) }; },
+  aimSlot(id) { const sl = SLOT.get(id), v = viewPointOf(sl); player.x = v.pos.x; player.z = v.pos.z; camera.position.copy(v.pos); camera.lookAt(v.look); look.setFromQuaternion(camera.quaternion); lastRay = 0; },
+  get hovered() { return hovered ? { id: hovered.id, slot: !!hovered.slotTarget } : null; },
+  merge(rows) { mergeRows(rows.map(fromRow), { animateNew: true }); },
   get ui() { return { uiOpen, back: backTarget(), help: helpOpen(), toasts: $('#toasts').children.length, cam: camera.position.toArray().concat(camera.quaternion.toArray()) }; },
   async card(id, withPhoto = true) { return (await drawShareCard(exhibits.find(e => e.id === id), withPhoto)).toDataURL(); },
 };
