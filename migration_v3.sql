@@ -1,39 +1,15 @@
 -- ============================================================
---  실패 박물관 (Failure Museum) · Supabase 스키마 (v3: 전시 슬롯 · 전당 · 2주 뒤 철거)
---  새 프로젝트: Supabase 대시보드 → SQL Editor → New query 에 이 파일 전체를 붙여넣고 [Run].
---  이미 v2 스키마로 운영 중인 DB 라면 이 파일 대신 migration_v3.sql 을 실행하세요 (둘 다 여러 번 실행해도 안전).
---  시드 데이터는 없습니다. 박물관은 빈 상태로 시작합니다.
+--  실패 박물관 · migration_v3.sql  (v2 → v3: 전시 슬롯 · 전당 in_hall · 2주 뒤 철거)
+--  이미 운영 중인 DB 에 적용합니다. Supabase 대시보드 → SQL Editor → New query 에 이 파일 전체를 붙여넣고 [Run].
+--  여러 번 실행해도 안전합니다 (if not exists / create or replace / drop ... if exists).
+--  권장 순서: (1) Database → Extensions 에서 pg_cron 켜기 → (2) 이 파일 실행 → (3) 맨 아래 확인 결과 보기
+--
+--  기존 작품 처리:
+--   - expires_at: 이 마이그레이션을 실행한 시각 + 14일 (옛 작품이 바로 지워지지 않게 등록일이 아니라 적용일 기준)
+--   - in_hall   : 지금 공감 상위 5(공감 1 이상)는 전당으로 → expires_at = null (영구 보존)
+--   - slot_id   : 전당이 아닌 작품을 오래된 순서로 중앙홀부터 가까운 빈 슬롯에 배정
+--                 (index.html 이 slot_id 없는 작품을 화면에 놓는 순서와 같은 기준)
 -- ============================================================
-
-create extension if not exists pgcrypto;
-
--- ---------- 1. 전시품 테이블 ----------
-create table if not exists public.exhibits (
-  id          text primary key default gen_random_uuid()::text,
-  title       text not null check (char_length(title) between 1 and 40),
-  cause       text not null check (char_length(cause) between 1 and 60),
-  age         text not null check (char_length(age) between 1 and 60),
-  relic       text not null default '없음 (빈손으로 감)' check (char_length(relic) <= 60),
-  epitaph     text not null default '고인은 말이 없다' check (char_length(epitaph) <= 60),
-  empathy     integer not null default 0 check (empathy >= 0),
-  created_at  timestamptz not null default now()
-);
--- 사진 URL (nullable): 우리 Storage 버킷의 공개 URL만 허용
-alter table public.exhibits add column if not exists photo_url text;
-alter table public.exhibits drop constraint if exists exhibits_photo_url_check;
-alter table public.exhibits add constraint exhibits_photo_url_check
-  check (photo_url is null or (char_length(photo_url) <= 500 and photo_url like '%/storage/v1/object/public/exhibit-photos/%'));
-
--- 예전 버전(시드 15개)을 실행했던 DB라면 시드를 지운다
-delete from public.exhibits where id like 'seed-%';
-
--- id는 브라우저가 만든 UUID (낙관적 반영과 실시간 이벤트를 id로 합치기 위해)
-alter table public.exhibits drop constraint if exists exhibits_id_format;
-alter table public.exhibits add constraint exhibits_id_format
-  check (id ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$');
-
-create index if not exists exhibits_created_at_idx on public.exhibits (created_at desc);
-create index if not exists exhibits_empathy_idx    on public.exhibits (empathy desc, created_at);
 
 -- ---------- v3-1. 슬롯 · 전당 · 철거 컬럼 ----------
 -- slot_id    : 작품이 걸린 벽 자리 (index.html 의 SLOTS 배열 id, 예: hall-03 / regret-12 / annex-004)
@@ -232,53 +208,41 @@ begin
   end if;
 end $$;
 
--- ---------- 4. 방문객 카운터 ("당신은 N번째 방문객입니다") ----------
-create table if not exists public.visit_counter (
-  id    int primary key default 1 check (id = 1),
-  count bigint not null default 0
-);
-insert into public.visit_counter (id, count) values (1, 0) on conflict (id) do nothing;
-alter table public.visit_counter enable row level security;   -- 정책 없음: RPC 외 접근 불가
+-- ---------- 기존 작품: 전당 계산 → 빈 슬롯 배정 ----------
+select public.refresh_hall();
 
-create or replace function public.register_visit()
-returns bigint
-language sql
-security definer
-set search_path = public
-as $$
-  update public.visit_counter set count = count + 1 where id = 1 returning count;
-$$;
-revoke all on function public.register_visit() from public;
-grant execute on function public.register_visit() to anon, authenticated;
+with free as (
+  select s.slot, row_number() over (order by s.ord) as rn
+    from unnest(array[
+    'hall-05', 'hall-12', 'hall-04', 'hall-11', 'hall-06', 'hall-13', 'hall-03', 'hall-10', 'hall-16', 'hall-17',
+    'hall-07', 'hall-14', 'hall-02', 'hall-09', 'hall-20', 'hall-21', 'hall-01', 'hall-08', 'hall-15', 'hall-18',
+    'hall-19', 'hall-22', 'lazy-08', 'dead-07', 'lazy-06', 'dead-06', 'unfin-03', 'dead-08', 'lazy-07', 'regret-05',
+    'unfin-01', 'regret-01', 'dead-04', 'unfin-04', 'regret-06', 'lazy-05', 'unfin-02', 'regret-02', 'regret-07', 'dead-05',
+    'cry-08', 'lazy-04', 'lazy-03', 'dead-01', 'regret-18', 'regret-03', 'unfin-15', 'regret-17', 'regret-19', 'lazy-02',
+    'dead-02', 'regret-16', 'regret-20', 'unfin-08', 'lazy-01', 'dead-03', 'regret-21', 'unfin-16', 'cry-07', 'unfin-09',
+    'regret-22', 'unfin-11', 'regret-10', 'regret-09', 'regret-11', 'unfin-17', 'regret-08', 'regret-12', 'unfin-05', 'regret-23',
+    'regret-04', 'unfin-10', 'unfin-12', 'regret-13', 'unfin-06', 'regret-14', 'unfin-13', 'regret-15', 'unfin-07', 'lobby-02',
+    'lobby-03', 'lobby-01', 'lobby-04', 'unfin-14', 'cry-06', 'cry-01', 'cry-05', 'cry-02', 'cry-04', 'cry-03'
+  ]) with ordinality as s(slot, ord)
+   where not exists (select 1 from public.exhibits e where e.slot_id = s.slot and not e.in_hall)
+), need as (
+  select id, row_number() over (order by created_at, id) as rn
+    from public.exhibits
+   where slot_id is null and not in_hall
+)
+update public.exhibits e
+   set slot_id = f.slot
+  from need n join free f on f.rn = n.rn
+ where e.id = n.id;
+-- (정적 슬롯 90개보다 작품이 많으면 남은 작품은 slot_id 가 비어 있고, 앱이 별관 슬롯을 계산해 claim_slot 으로 기록합니다)
 
--- ---------- 6. Storage: 사진 버킷 "exhibit-photos" ----------
--- 공개 읽기(public = true). 파일 크기 제한 1MB(앱이 500KB 이하로 압축해 올림), 이미지 형식만 허용.
-insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
-values ('exhibit-photos', 'exhibit-photos', true, 1048576, array['image/jpeg', 'image/png', 'image/webp'])
-on conflict (id) do update
-  set public = excluded.public,
-      file_size_limit = excluded.file_size_limit,
-      allowed_mime_types = excluded.allowed_mime_types;
-
--- 누구나 읽기
-drop policy if exists exhibit_photos_read on storage.objects;
-create policy exhibit_photos_read on storage.objects
-  for select to anon, authenticated
-  using (bucket_id = 'exhibit-photos');
-
--- 익명 업로드 허용: 이 버킷, "<uuid>.jpg" 이름만. 덮어쓰기(update)·삭제 정책은 없음.
-drop policy if exists exhibit_photos_upload on storage.objects;
-create policy exhibit_photos_upload on storage.objects
-  for insert to anon, authenticated
-  with check (
-    bucket_id = 'exhibit-photos'
-    and name ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.jpg$'
-  );
-
--- ---------- 확인용 쿼리 (실행 결과가 보이면 설정 완료) ----------
+-- ---------- 확인 (한 줄이 나오면 성공) ----------
 select
-  (select count(*) from public.exhibits)                                            as exhibits_rows,
-  (select public from storage.buckets where id = 'exhibit-photos')                   as bucket_public,
-  (select count(*) from pg_publication_tables
-     where pubname = 'supabase_realtime' and tablename = 'exhibits')                 as realtime_on,
-  (select count(*) from pg_extension where extname = 'pg_cron')                      as pg_cron_on;
+  (select count(*) from public.exhibits)                                   as exhibits_rows,
+  (select count(*) from public.exhibits where slot_id is not null)         as with_slot,
+  (select count(*) from public.exhibits where in_hall)                     as in_hall,
+  (select count(*) from public.exhibits where expires_at is null)          as permanent,
+  (select min(expires_at) from public.exhibits)                            as next_expiry,
+  (select count(*) from pg_extension where extname = 'pg_cron')            as pg_cron_on;
+-- pg_cron 작업이 등록됐는지 (pg_cron 을 켠 경우에만 실행):
+--   select jobname, schedule, command from cron.job where jobname = 'failure-museum-expire';

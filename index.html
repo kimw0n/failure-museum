@@ -102,6 +102,7 @@
   .err { color: #b3242f; font-size: 13px; min-height: 18px; margin: 2px 0 10px; font-family: var(--sans); }
   .slot-note { font: 13px var(--sans); color: #3a3440; background: #e8e2cf; padding: 7px 10px; margin: 0 0 8px; text-align: left; }
   .slot-note b { color: #8a1b24; }
+  .expire-note { font: 12px var(--sans); color: #6b5f6f; margin: 0 0 8px; }
   .row { display: flex; gap: 8px; } .row > * { flex: 1; margin-top: 0; }
   @media (min-width: 641px) { body.panel-open #toasts { left: 16px; transform: none; width: min(460px, calc(100% - 430px)); } }
   @media (max-width: 640px) {
@@ -232,6 +233,7 @@
     <dt>향년</dt><dd id="dAge"></dd>
     <dt>사망 원인</dt><dd id="dCause"></dd>
     <dt>유품</dt><dd id="dRelic"></dd>
+    <dt>전시 기간</dt><dd id="dDday"></dd>
   </dl>
   <p class="epitaph" id="dEpitaph"></p>
   <p class="emp-count" id="dEmp"></p>
@@ -266,6 +268,7 @@
       <p class="photo-msg" id="photoMsg"></p>
     </div>
     <p class="slot-note" id="regSlot"></p>
+    <p class="expire-note">일반 전시는 2주 뒤 철거됩니다. 공감을 모아 전당에 입성하면 영구 보존!</p>
     <p class="err" id="regErr"></p>
     <div class="row">
       <button type="button" class="btn-ghost" data-close>그냥 구경만 할게요</button>
@@ -1470,7 +1473,15 @@ function drawPlacard(c, W, H, ex) {
   c.fillStyle = '#2a2233'; c.font = `700 ${H * .08}px ${FONT_SERIF}`;
   c.fillText(`“${ex.epitaph}”`, W / 2, H * .71, W * .88);
   c.fillStyle = '#b3242f'; c.font = `700 ${H * .085}px ${FONT_SANS}`;
-  c.fillText(`ㅠㅠ 공감 ${ex.empathy}`, W / 2, H * .87);
+  const dd = ddayText(ex);
+  c.fillText(`ㅠㅠ 공감 ${ex.empathy}${dd ? '   ·   ' + dd : ''}`, W / 2, H * .87, W * .9);
+  if (daysLeft(ex) <= 3) {   // 만료 3일 전부터: 작은 붉은 "철거 예정" 스티커
+    c.save(); c.translate(W - H * .2, H * .2); c.rotate(.25);
+    c.fillStyle = '#c4222e'; c.beginPath(); c.arc(0, 0, H * .15, 0, Math.PI * 2); c.fill();
+    c.strokeStyle = '#fff'; c.lineWidth = H * .012; c.beginPath(); c.arc(0, 0, H * .125, 0, Math.PI * 2); c.stroke();
+    c.fillStyle = '#fff'; c.font = `700 ${H * .062}px ${FONT_SANS}`; c.fillText('철거', 0, -H * .03); c.fillText('예정', 0, H * .04);
+    c.restore();
+  }
 }
 function drawFamePlaque(c, W, H, ex, rank) {
   const grd = c.createLinearGradient(0, 0, W, H); grd.addColorStop(0, '#f7dc8a'); grd.addColorStop(.5, '#d9a93c'); grd.addColorStop(1, '#f2cd6a');
@@ -1518,7 +1529,7 @@ function createFrame(ex, style, rank) {
   return { id: ex.id, ex, style, rank, zone: null, group, inner, fm, pic, placard, tilt,
     loaded: false, photo: null, photoState: 'none', token: 0, textTex: null, placardCanvas: null, placardTex: null, placardKey: '', anim: null, move: null, slot: null };
 }
-function placardKeyOf(f) { const e = f.ex; return [f.style, f.rank, e.title, e.cause, e.age, e.relic, e.epitaph, e.empathy].join('|'); }
+function placardKeyOf(f) { const e = f.ex; return [f.style, f.rank, e.title, e.cause, e.age, e.relic, e.epitaph, e.empathy, ddayText(e)].join('|'); }
 function drawFramePlacard(f, force = false) {
   if (!f.loaded) return;
   const key = placardKeyOf(f);
@@ -1669,6 +1680,7 @@ function reindex() { exIndex.clear(); for (const e of exhibits) exIndex.set(e.id
 function layoutAll({ animate = new Set(), initial = false } = {}) {
   const live = exhibits.filter(e => !isExpired(e));
   const fame = hallMembers(live);
+  for (const e of live) if (!dbHall()) e.inHall = fame.includes(e);
   const fameIds = new Set(fame.map(e => e.id));
   const rest = live.filter(e => !fameIds.has(e.id)).sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt) || (a.id < b.id ? -1 : 1));
   // 별관: 이미 쓰는 별관 번호까지 + 빈 자리가 늘 2개 이상 남도록 4칸씩 늘림
@@ -1700,9 +1712,36 @@ function layoutAll({ animate = new Set(), initial = false } = {}) {
   updateEmptySlots();
   if (placing && !slotFree(placing)) onPlacingTaken();
 }
-// 전당 = 공감 1 이상 상위 5 (DB가 in_hall을 관리하면 그 값을 따른다 — 4단계)
-function hallMembers(list) { return topFive(list); }
-function isExpired() { return false; }
+// 전당 = 공감 1 이상 상위 5. 공용 DB(v3)에서는 DB가 계산한 in_hall을 그대로 따른다 (increment_empathy 안에서 재계산).
+const dbHall = () => CONFIGURED && Remote.v3;
+function hallMembers(list) { return dbHall() ? list.filter(e => e.inHall).sort(byRank).slice(0, 5) : topFive(list); }
+// ---------- 2주 뒤 철거 (전당은 영구 보존) ----------
+const DAY = 864e5, EXPIRE_DAYS = 14;
+const isPermanent = e => { const p = placement.get(e.id); return e.inHall || (p && p.zone === 'fame'); };
+function isExpired(e, t = Date.now()) { return !e.pending && !e.inHall && !!e.expiresAt && Date.parse(e.expiresAt) <= t; }
+function daysLeft(e) {
+  if (isPermanent(e) || !e.expiresAt) return Infinity;
+  return Math.max(0, Math.ceil((Date.parse(e.expiresAt) - Date.now()) / DAY));
+}
+function ddayText(e) {
+  if (isPermanent(e)) return '영구 보존';
+  if (!e.expiresAt) return '';
+  const d = daysLeft(e);
+  return d <= 0 ? '오늘 철거 예정' : `철거까지 D-${d}`;
+}
+// cron이 늦어도 만료된 작품은 화면에서 뺀다 (15초마다 확인)
+function pruneExpired() {
+  const gone = exhibits.filter(e => isExpired(e));
+  if (!gone.length) return;
+  gone.forEach(e => removeExhibit(e.id, { silent: true }));
+}
+function removeExhibit(id, { silent = false } = {}) {
+  const e = exIndex.get(id);
+  if (!e) return;
+  exhibits = exhibits.filter(x => x.id !== id); exIndex.delete(id);
+  if (selected && selected.id === id) { closeUI(); if (!silent) toast(`故「${esc(e.title)}」는 방금 철거되었습니다. 잊혀지는 것도 실패의 일부입니다.`, 5000); }
+  scheduleLayout();
+}
 function applyLayout(want, { animate, initial }) {
   for (const [id, f] of frames) if (!want.has(id)) { destroyFrame(f); frames.delete(id); }
   for (const [id, w] of want) {
@@ -1993,7 +2032,8 @@ function fromRow(r) {
   const sid = r.slot_id ?? r.slotId ?? null;
   return { id: String(r.id), title: r.title, cause: r.cause, age: r.age, relic: r.relic, epitaph: r.epitaph,
     empathy: r.empathy | 0, createdAt: r.created_at || r.createdAt, photoUrl: safePhotoUrl(r.photo_url ?? r.photoUrl),
-    slotId: typeof sid === 'string' && SLOT_ID_RE.test(sid) ? sid : null };
+    slotId: typeof sid === 'string' && SLOT_ID_RE.test(sid) ? sid : null,
+    inHall: !!(r.in_hall ?? r.inHall), expiresAt: r.expires_at !== undefined ? r.expires_at : r.expiresAt };
 }
 
 // ---------- 로컬 모드 ----------
@@ -2001,16 +2041,29 @@ const LocalStore = {
   db() { return LS.get('fm_local_db', { added: [], delta: {} }); },
   async load() {
     const d = this.db();
-    return d.added.filter(e => !String(e.id).startsWith('seed-')).map(e => ({ ...fromRow(e), empathy: (e.empathy | 0) + (d.delta[e.id] || 0) }));
+    const t = Date.now();
+    d.added = d.added.filter(e => !String(e.id).startsWith('seed-'));
+    for (const e of d.added) if (e.expiresAt === undefined) e.expiresAt = new Date(Date.parse(e.createdAt) + EXPIRE_DAYS * DAY).toISOString();
+    const keep = d.added.filter(e => !e.expiresAt || Date.parse(e.expiresAt) > t || e.inHall);   // 로컬 모드의 자동 철거
+    if (keep.length !== d.added.length) { d.added = keep; LS.set('fm_local_db', d); }
+    return keep.map(e => ({ ...fromRow(e), empathy: (e.empathy | 0) + (d.delta[e.id] || 0) }));
   },
   async add(ex) {
     const d = this.db();
-    d.added.push({ id: ex.id, title: ex.title, cause: ex.cause, age: ex.age, relic: ex.relic, epitaph: ex.epitaph, empathy: 0, createdAt: ex.createdAt, photoUrl: ex.photoUrl || null, slotId: ex.slotId || null });
+    d.added.push({ id: ex.id, title: ex.title, cause: ex.cause, age: ex.age, relic: ex.relic, epitaph: ex.epitaph, empathy: 0, createdAt: ex.createdAt, photoUrl: ex.photoUrl || null, slotId: ex.slotId || null, expiresAt: ex.expiresAt });
     if (!LS.set('fm_local_db', d)) throw new Error('quota');
   },
   async empathize(id) {
     const d = this.db();
     d.delta[id] = (d.delta[id] || 0) + 1;
+    // 전당 재계산 (공용 DB의 refresh_hall과 같은 규칙): 들어가면 영구 보존, 밀려나면 14일 다시 시작
+    const emp = e => (e.empathy | 0) + (d.delta[e.id] || 0);
+    const top = new Set(d.added.filter(e => emp(e) >= FAME_MIN).sort((a, b) => emp(b) - emp(a) || Date.parse(a.createdAt) - Date.parse(b.createdAt)).slice(0, 5).map(e => e.id));
+    for (const e of d.added) {
+      if (top.has(e.id) && !e.inHall) { e.inHall = true; e.expiresAt = null; }
+      else if (!top.has(e.id) && e.inHall) { e.inHall = false; e.expiresAt = new Date(Date.now() + EXPIRE_DAYS * DAY).toISOString(); }
+      const live = exIndex.get(e.id); if (live) { live.inHall = !!e.inHall; live.expiresAt = e.expiresAt; }
+    }
     LS.set('fm_local_db', d);
     const base = d.added.find(e => e.id === id);
     return base ? (base.empathy | 0) + d.delta[id] : null;
@@ -2049,9 +2102,12 @@ const Remote = {
   },
   async load() {
     // 최신 300개 + 공감 상위 10개 (오래된 전당 작품도 빠지지 않게)
+    // 만료 조건(expires_at is null or expires_at > now())을 걸어 cron이 늦어도 철거된 작품은 받지 않는다
+    const live = this.v3 ? `&or=(expires_at.is.null,expires_at.gt.${encodeURIComponent(new Date().toISOString())})` : '';
     const [recent, top] = await Promise.all([
-      sbFetch('/rest/v1/exhibits?select=*&order=created_at.desc&limit=300'),
-      sbFetch('/rest/v1/exhibits?select=*&empathy=gte.1&order=empathy.desc,created_at.asc&limit=10'),
+      sbFetch(`/rest/v1/exhibits?select=*${live}&order=created_at.desc&limit=500`),
+      this.v3 ? sbFetch('/rest/v1/exhibits?select=*&in_hall=eq.true&limit=10')
+        : sbFetch('/rest/v1/exhibits?select=*&empathy=gte.1&order=empathy.desc,created_at.asc&limit=10'),
     ]);
     const map = new Map();
     for (const r of [...top, ...recent]) map.set(String(r.id), fromRow(r));
@@ -2128,6 +2184,7 @@ async function connectRealtime() {
   Net.channel = Net.client.channel('exhibits-feed')
     .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'exhibits' }, p => mergeRows([fromRow(p.new)], { animateNew: true }))
     .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'exhibits' }, p => mergeRows([fromRow(p.new)]))
+    .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'exhibits' }, p => p.old && p.old.id && removeExhibit(String(p.old.id)))
     .subscribe((status, err) => {
       if (status === 'SUBSCRIBED') {
         Net.subscribed = true; stopPolling(); setStatus('realtime');
@@ -2143,6 +2200,7 @@ async function connectRealtime() {
   setTimeout(() => { if (!Net.subscribed) { if (Net.status !== 'offline') setStatus('polling'); startPolling(); } }, 8000);
 }
 document.addEventListener('visibilitychange', () => { if (!document.hidden && CONFIGURED) syncOnce(); });
+setInterval(() => initialLoaded && pruneExpired(), 15000);
 addEventListener('online', () => CONFIGURED && syncOnce());
 addEventListener('offline', () => CONFIGURED && setStatus('offline'));
 
@@ -2170,6 +2228,7 @@ function mergeRows(rows, { animateNew = false } = {}) {
     const emp = pendingEmp.has(r.id) ? Math.max(r.empathy, e.empathy) : r.empathy;
     if (emp !== e.empathy) { scheduleLayout(); e.empathy = emp; }
     if (r.photoUrl && e.photoUrl !== r.photoUrl) e.photoUrl = r.photoUrl;
+    if (Remote.v3 && (r.inHall !== e.inHall || r.expiresAt !== e.expiresAt)) { e.inHall = r.inHall; e.expiresAt = r.expiresAt; scheduleLayout(); }
     if (Remote.v3 && !e.pending && r.slotId !== e.slotId) { if (e.slotId && !r.slotId) e.homeSlot = e.slotId; e.slotId = r.slotId; scheduleLayout(); }
     if (e.pending) { e.pending = false; e.createdAt = r.createdAt || e.createdAt; }
   }
@@ -2185,7 +2244,7 @@ function mergeRows(rows, { animateNew = false } = {}) {
 // 여러 이벤트가 몰려도 한 번만 재배치하고, 그 사이 순위 변화를 속보로 알린다
 function scheduleLayout(animateIds = []) {
   if (!pendingLayout) {
-    pendingLayout = { before: topFive().map(e => e.id), animate: new Set() };
+    pendingLayout = { before: hallMembers(exhibits.filter(e => !isExpired(e))).map(e => e.id), animate: new Set() };
     setTimeout(flushLayout, 60);
   }
   animateIds.forEach(id => pendingLayout.animate.add(id));
@@ -2194,7 +2253,7 @@ function flushLayout() {
   const p = pendingLayout; pendingLayout = null;
   if (!p) return;
   layoutAll({ animate: p.animate });
-  topFive().forEach((e, i) => {
+  hallMembers(exhibits.filter(e => !isExpired(e))).forEach((e, i) => {
     const old = p.before.indexOf(e.id);
     if (old === -1 || i < old) announceRank(e, i, old === -1);
   });
@@ -2271,6 +2330,7 @@ function onTap(x, y) {
 function openDetail(ex) {
   if (ex === NPC_TARGET) { say('poke', { force: true }); return; }
   if (ex.slotTarget) { openRegister({ slotId: ex.id }); return; }
+  if (daysLeft(ex) <= 3 && Math.random() < .7) say('expiring', { force: true });
   selected = ex; uiOpen = 'detail';
   document.body.classList.add('panel-open');
   unlockPointer();
@@ -2290,6 +2350,9 @@ function refreshDetail() {
   $('#dAge').textContent = ex.age;
   $('#dCause').textContent = ex.cause;
   $('#dRelic').textContent = ex.relic;
+  const dd = ddayText(ex);
+  $('#dDday').textContent = dd || '—';
+  $('#dDday').style.color = daysLeft(ex) <= 3 ? '#b3242f' : '';
   $('#dEpitaph').textContent = `“${ex.epitaph}”`;
   $('#dEmp').textContent = `${ex.empathy}명이 “나도 이런 적 있음”을 눌렀습니다`;
   const done = mine.empathized.has(ex.id);
@@ -2386,7 +2449,7 @@ async function doEmpathy(ex) {
   refreshDetail();
   try {
     const n = CONFIGURED ? await Remote.empathize(ex.id) : await LocalStore.empathize(ex.id);
-    if (typeof n === 'number') { pendingEmp.delete(ex.id); scheduleLayout(); ex.empathy = n; }
+    if (typeof n === 'number') { pendingEmp.delete(ex.id); scheduleLayout(); ex.empathy = n; if (CONFIGURED && !Net.subscribed) syncOnce(); }
   } catch (e) {
     console.warn('[실패 박물관] 공감 전송 실패', e);
     scheduleLayout();
@@ -2530,6 +2593,7 @@ async function submitRegister(e) {
     id: uuid(), title: d.title, cause: d.cause, age: d.age,
     relic: d.relic || '없음 (빈손으로 감)', epitaph: d.epitaph || '고인은 말이 없다',
     empathy: 0, createdAt: new Date().toISOString(), photoUrl: null, localPhoto: photo ? photo.url : null, pending: true, slotId: slot.id,
+    inHall: false, expiresAt: new Date(Date.now() + EXPIRE_DAYS * DAY).toISOString(),
   };
   setPlacing(null);
   // 1) 낙관적 반영: 바로 안치실 벽에 걸고 카메라 이동
@@ -2931,6 +2995,12 @@ Object.assign(LINES, {
     '붉은 조명은 분위기가 아니라 경고등입니다.',
     '(헉헉) 마감 5분 전에 겨우 도착했습니다. 관장도 예외는 없어요.',
   ],
+  expiring: [
+    '이 작품은 곧 철거됩니다. 잊혀지는 것도 실패의 일부입니다.',
+    '철거 예정 스티커 보이시죠? 공감이 모이면 전당으로 옮겨 영구 보존해 드립니다.',
+    '2주면 잊힙니다. 실패는 원래 그렇게 조용히 퇴장하죠.',
+    '액자등이 깜빡이는 건 고장이 아닙니다. 작품이 마지막 인사를 하는 중이에요.',
+  ],
   annex: [
     '별관입니다. 실패가 너무 많아 급히 늘렸습니다. 이것도 계획에 없던 일이죠.',
     '증축 공사는 끝나지 않습니다. 실패도 끝나지 않으니까요.',
@@ -3217,6 +3287,7 @@ async function boot() {
     try { await Remote.detect(); exhibits = await Remote.load(); setStatus('polling'); Net.lastSync = Date.now(); }
     catch (e) { console.warn('[실패 박물관] 첫 로딩 실패', e); exhibits = []; setStatus('offline'); startPolling(); }
   } else exhibits = await LocalStore.load();
+  exhibits = exhibits.filter(e => !isExpired(e));
   reindex();
   await ensureFonts(exhibitText(exhibits));
   layoutAll({ initial: true });
@@ -3247,6 +3318,7 @@ window.FM = {
   get slotState() { return { total: slotList.length, occupied: occupiedSlots.size, free: slotList.length - occupiedSlots.size, placing, v3: Remote.v3, annexLen, byExhibit: Object.fromEntries([...occupiedSlots].map(([sid, e]) => [e.id, sid])) }; },
   aimSlot(id) { const sl = SLOT.get(id), v = viewPointOf(sl); player.x = v.pos.x; player.z = v.pos.z; camera.position.copy(v.pos); camera.lookAt(v.look); look.setFromQuaternion(camera.quaternion); lastRay = 0; },
   get hovered() { return hovered ? { id: hovered.id, slot: !!hovered.slotTarget } : null; },
+  prune() { pruneExpired(); }, expire(id) { const e = exIndex.get(id); if (e) { e.expiresAt = new Date(Date.now() - 1000).toISOString(); pruneExpired(); } },
   merge(rows) { mergeRows(rows.map(fromRow), { animateNew: true }); },
   get ui() { return { uiOpen, back: backTarget(), help: helpOpen(), toasts: $('#toasts').children.length, cam: camera.position.toArray().concat(camera.quaternion.toArray()) }; },
   async card(id, withPhoto = true) { return (await drawShareCard(exhibits.find(e => e.id === id), withPhoto)).toDataURL(); },
