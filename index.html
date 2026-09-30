@@ -154,6 +154,13 @@
   #lightbox { position: fixed; inset: 0; z-index: 60; background: rgba(0,0,0,.92); display: grid; place-items: center; cursor: zoom-out; padding: 12px; }
   #lightbox[hidden] { display: none; }
   #lightbox img { max-width: 100%; max-height: 100%; object-fit: contain; }
+  /* 미니맵 */
+  #minimap { position: absolute; right: 12px; top: calc(max(12px, env(safe-area-inset-top)) + 50px); width: 172px; height: 150px; background: rgba(10, 9, 22, .72); border: 1px solid var(--line); border-radius: 4px; cursor: zoom-in; }
+  #minimap.big { position: fixed; z-index: 36; left: 50%; top: 50%; right: auto; width: min(92vw, 760px); height: min(80vh, 640px); transform: translate(-50%, -50%); cursor: zoom-out; background: rgba(10, 9, 22, .94); }
+  #minimap[hidden] { display: none; }
+  #btnMap { position: absolute; right: 12px; top: calc(max(12px, env(safe-area-inset-top)) + 50px); background: rgba(10, 9, 22, .78); color: var(--text); border: 1px solid var(--line); height: 34px; padding: 0 10px; font-size: 13px; border-radius: 3px; }
+  #btnMap[hidden] { display: none; }
+  @media (max-width: 640px) { #minimap:not(.big) { width: 104px; height: 92px; top: calc(max(12px, env(safe-area-inset-top)) + 50px); } }
   /* 모바일 뒤로가기(닫기) 버튼: 닫을 UI가 있을 때만 */
   #btnBack { position: fixed; z-index: 38; left: 12px; bottom: max(14px, env(safe-area-inset-bottom)); background: rgba(10, 9, 22, .9); color: var(--text); border: 1px solid var(--line); border-radius: 22px; height: 44px; padding: 0 18px; font-size: 15px; box-shadow: 0 4px 16px rgba(0,0,0,.5); }
   #btnBack[hidden], body:not(.touch) #btnBack { display: none; }
@@ -204,6 +211,8 @@
     <button id="btnMute" aria-label="음소거">🔊</button>
     <button id="btnHelp" title="도움말" aria-label="도움말">?</button>
   </div>
+  <canvas id="minimap" title="미니맵 (누르면 크게 · M 접기)"></canvas>
+  <button id="btnMap" hidden>🗺 지도 (M)</button>
   <div id="subtitle"></div>
   <button id="btnLook" hidden>자세히 보기</button>
   <div id="toasts"></div>
@@ -301,6 +310,9 @@ const renderer = new THREE.WebGLRenderer({ antialias: !isTouch, powerPreference:
 let pixelRatio = Math.min(devicePixelRatio, isTouch ? 1.5 : 2);
 renderer.setPixelRatio(pixelRatio);
 renderer.setSize(innerWidth, innerHeight);
+// 그림자: 데스크톱에서 스포트라이트 두 개(트로피, 전당)만
+renderer.shadowMap.enabled = !isTouch;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 renderer.domElement.id = 'view';
 document.body.prepend(renderer.domElement);
 
@@ -393,76 +405,105 @@ function blocked(x, z, r) {
       if (x > c.minX - r && x < c.maxX + r && z > c.minZ - r && z < c.maxZ + r) return true;
   return false;
 }
-// 계단 구간은 경사로처럼 처리하고, 전당은 2층 높이
+// 바닥 높이: 계단은 경사로처럼 처리하고, 전당은 2층
 function floorAt(x, z) {
-  if (x >= STAIR.x1) return STAIR.rise;
-  if (x > STAIR.x0) return clamp((x - STAIR.x0) / (STAIR.x1 - STAIR.x0), 0, 1) * STAIR.rise;
+  if (inRect(ZONES.fame.rects[0], x, z)) return STAIR.rise;
+  if (x > STAIR.x0 && x < STAIR.x1 && z > STAIR.z0 - .5 && z < STAIR.z1 + .5) return clamp((x - STAIR.x0) / (STAIR.x1 - STAIR.x0), 0, 1) * STAIR.rise;
   return 0;
 }
 
-// 벽: 축 정렬 선분 + 문 구멍
-const WALL_T = 0.3;
-function wallLine(parent, axis, fixed, from, to, height, m, doors = [], y0 = 0, doorH = 3) {
-  const cuts = [from, ...doors.flat(), to];
-  for (let i = 0; i < cuts.length; i += 2) {
-    const a = cuts[i], b = cuts[i + 1];
-    if (b - a > 0.01) segment(a, b, y0, height);
-  }
-  for (const [a, b] of doors) segment(a, b, y0 + doorH, height - doorH, false);
-  function segment(a, b, yb, h, collide = true) {
-    const len = b - a, mid = (a + b) / 2;
-    const w = axis === 'x' ? len : WALL_T, d = axis === 'x' ? WALL_T : len;
-    const x = axis === 'x' ? mid : fixed, z = axis === 'x' ? fixed : mid;
-    box(w, h, d, m, x, yb + h / 2, z, parent);
-    if (collide) addCollider(colliderTarget, x, z, w, d);
-  }
+// ================================================================
+//  공간: 방과 복도가 이어진 한 건물 (y=0, 전당만 2층)
+//   로비          x[-9,9]    z[0,14]
+//   중앙홀        x[-11,11]  z[-24,0]    깨진 트로피 조형물 · 기둥 6개 · 천장 7m · 대리석
+//   후회의 회랑    x[-20,-11] z[-22,-19] + x[-23,-20] z[-22,2]   폭 3m · 약 33m · 코너 1번 → 울음방
+//   울음방        x[-23,-9]  z[2,12]     → 로비
+//   귀찮음의 방    x[-9,0]    z[-32,-24]  · 마감의 방 x[0,9] z[-32,-24] (둘 사이 문)
+//   미완성 갤러리  ㄷ자: x[11,18] z[-21,-18] → x[18,21] z[-32,-18] → x[9,18] z[-32,-29] → 마감의 방
+//   계단          x[9,17]    z[5,9]  y 0→4   ·   전당 x[17,33] z[-3,17] y=4
+//   별관          x[-23-L,-23] z[-22,-19]   슬롯이 모자라면 서쪽으로 늘어남
+//  순환 동선: 로비→중앙홀→후회의 회랑→울음방→로비 / 중앙홀→귀찮음→마감→중앙홀 / 중앙홀→미완성 갤러리→마감→중앙홀
+// ================================================================
+const ZONES = {
+  lobby:  { name: '입구 로비', rects: [[-9, 9, 0, 14]], pvs: ['hall', 'morgue', 'stairs', 'fame', 'lazy', 'dead'] },
+  hall:   { name: '중앙홀 · 깨진 트로피', rects: [[-11, 11, -24, 0]], pvs: ['lobby', 'regret', 'unfin', 'lazy', 'dead', 'morgue', 'stairs'] },
+  regret: { name: '후회의 회랑', rects: [[-20, -11, -22, -19], [-23, -20, -22, 2]], corners: [[-21.5, -20.5]], pvs: ['hall', 'morgue', 'annex', 'lobby'] },
+  morgue: { name: '울음방', rects: [[-23, -9, 2, 12]], pvs: ['lobby', 'regret', 'stairs', 'hall', 'fame'] },
+  lazy:   { name: '귀찮음의 방', rects: [[-9, 0, -32, -24]], pvs: ['hall', 'dead', 'lobby'] },
+  dead:   { name: '마감의 방', rects: [[0, 9, -32, -24]], pvs: ['hall', 'lazy', 'unfin', 'lobby'] },
+  unfin:  { name: '미완성 갤러리', rects: [[11, 18, -21, -18], [18, 21, -32, -18], [9, 18, -32, -29]], corners: [[19.5, -19.5], [19.5, -30.5]], pvs: ['hall', 'dead'] },
+  stairs: { name: '전당 가는 계단', rects: [[9, 17, 5, 9]], pvs: ['lobby', 'fame', 'morgue', 'hall'] },
+  fame:   { name: '불멸의 흑역사관', rects: [[17, 33, -3, 17]], pvs: ['stairs', 'lobby', 'morgue'] },
+  annex:  { name: '별관 (증축 구역)', rects: [[-26, -23, -22, -19]], pvs: ['regret'] },
+};
+const ZONE_ORDER = ['fame', 'stairs', 'lobby', 'hall', 'regret', 'morgue', 'lazy', 'dead', 'unfin', 'annex'];
+// 구역 사이 문 (미니맵 · 카메라 이동 경로). axis: 문이 뚫린 벽의 방향 ('x' = z가 일정한 벽)
+const DOORS = [
+  { a: 'lobby', b: 'hall', x: 0, z: 0, axis: 'x', w: 6 },
+  { a: 'lobby', b: 'morgue', x: -9, z: 7, axis: 'z', w: 4 },
+  { a: 'lobby', b: 'stairs', x: 9, z: 7, axis: 'z', w: 4 },
+  { a: 'stairs', b: 'fame', x: 17, z: 7, axis: 'z', w: 4 },
+  { a: 'hall', b: 'regret', x: -11, z: -20.5, axis: 'z', w: 2.7 },
+  { a: 'hall', b: 'unfin', x: 11, z: -19.5, axis: 'z', w: 2.7 },
+  { a: 'hall', b: 'lazy', x: -4.5, z: -24, axis: 'x', w: 3 },
+  { a: 'hall', b: 'dead', x: 4.5, z: -24, axis: 'x', w: 3 },
+  { a: 'lazy', b: 'dead', x: 0, z: -28.25, axis: 'z', w: 2.5 },
+  { a: 'dead', b: 'unfin', x: 9, z: -30.5, axis: 'z', w: 2.7 },
+  { a: 'regret', b: 'morgue', x: -21.5, z: 2, axis: 'x', w: 2.7 },
+  { a: 'regret', b: 'annex', x: -23, z: -20.5, axis: 'z', w: 2.7 },
+];
+const inRect = (r, x, z) => x >= r[0] && x <= r[1] && z >= r[2] && z <= r[3];
+function zoneAt(x, z) {
+  for (const k of ZONE_ORDER) if (ZONES[k].rects.some(r => inRect(r, x, z))) return k;
+  return null;
 }
-function room(parent, { x0, x1, z0, z1, y = 0, h = 5, wall, floor, ceil, doors = {} }) {
-  const fl = mesh(geo('plane', x1 - x0, z1 - z0), floor, (x0 + x1) / 2, y, (z0 + z1) / 2, parent);
-  fl.rotation.x = -Math.PI / 2;
-  const ce = mesh(geo('plane', x1 - x0, z1 - z0), ceil, (x0 + x1) / 2, y + h, (z0 + z1) / 2, parent);
-  ce.rotation.x = Math.PI / 2;
-  if (doors.n !== false) wallLine(parent, 'x', z0, x0, x1, h, wall, doors.n || [], y);
-  if (doors.s !== false) wallLine(parent, 'x', z1, x0, x1, h, wall, doors.s || [], y);
-  if (doors.w !== false) wallLine(parent, 'z', x0, z0, z1, h, wall, doors.w || [], y);
-  if (doors.e !== false) wallLine(parent, 'z', x1, z0, z1, h, wall, doors.e || [], y);
-}
+const rectIndex = (zone, x, z) => ZONES[zone].rects.findIndex(r => inRect(r, x, z));
 
-// ================================================================
-//  공간 (하나의 건물, 4개 구역)
-//   로비       x[-9,9]   z[0,14]
-//   메인홀     x[-9,9]   z[-L,0]   (작품 수에 따라 L이 늘어남)
-//   신규 안치실 x[-19,-9] z[2,12]
-//   계단       x[9,17]   z[5,9]    y 0→4
-//   전당       x[17,33]  z[-3,17]  y=4
-// ================================================================
+// 구역별 그룹: 플레이어가 있는 구역과 거기서 보이는 구역(pvs)만 렌더
 const world = new THREE.Group();
 scene.add(world);
-
-const floorTex = canvasTexture(256, 256, (g, w, h) => {
-  g.fillStyle = '#bdbdbd'; g.fillRect(0, 0, w, h);
-  g.fillStyle = '#ffffff'; g.fillRect(0, 0, w / 2, h / 2); g.fillRect(w / 2, h / 2, w / 2, h / 2);
-  g.strokeStyle = 'rgba(0,0,0,.25)'; g.lineWidth = 3; g.strokeRect(0, 0, w, h);
-});
-floorTex.wrapS = floorTex.wrapT = THREE.RepeatWrapping;
-function floorMat(color, repeatX, repeatZ) {
-  const t = floorTex.clone(); t.needsUpdate = true; t.repeat.set(repeatX, repeatZ);
-  const m = new THREE.MeshLambertMaterial({ color, map: t });
-  m.userData.own = true;
-  return m;
+const zoneGroups = {};
+function zoneGroup(z) { const g = new THREE.Group(); g.name = z; world.add(g); zoneGroups[z] = g; return g; }
+let visibleZones = new Set(Object.keys(ZONES));
+function applyCulling(zone) {
+  visibleZones = new Set([zone, ...ZONES[zone].pvs]);
+  for (const [z, g] of Object.entries(zoneGroups)) g.visible = visibleZones.has(z);
 }
+
+// 재질: 벽은 구역마다 색을 달리한 Lambert, 바닥은 텍스처 없이 색 + roughness/metalness 로 구분
 const M = {
   wall: mat(0x2b2452), wallDeep: mat(0x1d1a36), ceil: mat(0x15122a),
+  wallHall: mat(0x3d3752), wallRegret: mat(0x2b3833), wallUnfin: mat(0x46382b), wallLazy: mat(0x242b42), wallDead: mat(0x3e1719),
+  baseboard: mat(0x19130f), molding: mat(0xcfc6b0), doorFrame: mat(0x4a3222),
+  pillar: mat(0xdcd6ca), pillarDark: mat(0x8f897f), plinth: mat(0x2a2733),
   trim: mat(0x0e0c1c), white: mat(0xeeeeee), black: mat(0x16151c), cream: mat(0xf2ecd8),
   wood: mat(0x5b3a26), woodDark: mat(0x3a2418), woodLight: mat(0x8a5a36),
-  gold: mat(0xe8b84a, { emissive: 0x4a3000 }),
+  gold: mat(0xe8b84a, { emissive: 0x4a3000 }), rope: mat(0x8e1b26),
+  pot: mat(0xa0583a), leaf: mat(0x2f6b3a), leafDark: mat(0x234f2c),
   fameWall: mat(0x4a1624), carpet: mat(0xa3202c),
   tube: new THREE.MeshBasicMaterial({ color: 0xf2f6ff }),
   tubeOff: new THREE.MeshBasicMaterial({ color: 0x4a4d5c }),
+  tubeWarm: new THREE.MeshBasicMaterial({ color: 0xffe0b0 }),
+  tubeRed: new THREE.MeshBasicMaterial({ color: 0xff6a5a }),
   flame: new THREE.MeshBasicMaterial({ color: 0xffc35a }),
+  guide: new THREE.MeshBasicMaterial({ color: 0xc9a23a }),
   hit: new THREE.MeshBasicMaterial({ visible: false }),
   beam: new THREE.MeshBasicMaterial({ color: 0xffe3a0, transparent: true, opacity: 0.09, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide }),
+  trophy: new THREE.MeshStandardMaterial({ color: 0xd9a63a, metalness: .55, roughness: .3, emissive: 0x2a1800, side: THREE.DoubleSide }),
 };
+const std = (color, roughness, metalness = 0) => new THREE.MeshStandardMaterial({ color, roughness, metalness });
+const FLOOR = {
+  marble: std(0x9f9ca8, .34, .1),      // 중앙홀: 밝은 회색 + 약한 반사
+  lobby: std(0x6d6982, .28, .1),
+  wood: std(0x6e4a2e, .62),            // 복도: 나무
+  woodDark: std(0x523522, .7),
+  carpetCry: std(0x35364f, 1),         // 방: 카펫
+  carpetLazy: std(0x2a3149, 1),
+  carpetDead: std(0x4d1d21, 1),
+  fame: std(0x5a1f2c, .45, .1),
+  rug: std(0x2f4a3a, 1), rugEdge: std(0xb08a3a, .9),
+};
+const NO_INSTANCE = new Set([M.tube, M.tubeOff, M.tubeWarm, M.tubeRed, M.flame, M.beam, M.hit]);
 
 function disposeGroup(g) {
   g.traverse(o => {
@@ -475,7 +516,84 @@ function disposeGroup(g) {
   g.removeFromParent();
 }
 
-// 표지판 / 삐뚤어진 액자
+// 같은 지오메트리 + 같은 재질을 쓰는 정적 메시(벽·걸레받이·기둥·벤치 …)를 구역마다 InstancedMesh 하나로 합친다
+const _im4 = new THREE.Matrix4();
+function instanceize(group) {
+  group.updateMatrixWorld(true);
+  const inv = new THREE.Matrix4().copy(group.matrixWorld).invert();
+  const buckets = new Map();
+  group.traverse(o => {
+    if (!o.isMesh || o.isInstancedMesh || o.children.length || NO_INSTANCE.has(o.material)) return;
+    for (let p = o; p && p !== group; p = p.parent) if (p.userData.keep) return;
+    const k = o.geometry.uuid + '|' + o.material.uuid;
+    if (!buckets.has(k)) buckets.set(k, []);
+    buckets.get(k).push(o);
+  });
+  for (const list of buckets.values()) {
+    if (list.length < 2) continue;
+    const im = new THREE.InstancedMesh(list[0].geometry, list[0].material, list.length);
+    list.forEach((o, i) => {
+      im.setMatrixAt(i, _im4.multiplyMatrices(inv, o.matrixWorld));
+      if (o.castShadow) im.castShadow = true;
+      if (o.receiveShadow) im.receiveShadow = true;
+      if (o.userData.wall) im.userData.wall = true;
+      o.removeFromParent();
+    });
+    im.computeBoundingSphere();
+    group.add(im);
+  }
+}
+
+// 벽: 축 정렬 선분 + 문 구멍. 단위 상자를 늘려 쓰므로 구역마다 InstancedMesh 하나로 합쳐진다.
+//  각 벽 조각에 걸레받이(아래)와 몰딩(위)을, 문에는 문틀을 붙인다.
+const WALL_T = 0.3;
+const UNIT_BOX = new THREE.BoxGeometry(1, 1, 1), UNIT_PLANE = new THREE.PlaneGeometry(1, 1);
+function wallLine(parent, axis, fixed, from, to, height, m, doors = [], y0 = 0, doorH = 3) {
+  const cuts = [from, ...doors.flat(), to];
+  for (let i = 0; i < cuts.length; i += 2) {
+    const a = cuts[i], b = cuts[i + 1];
+    if (b - a > 0.01) segment(a, b, y0, height, true);
+  }
+  for (const [a, b] of doors) {
+    if (height - doorH > .01) segment(a, b, y0 + doorH, height - doorH, false);
+    const t = WALL_T + .12, jw = .14;   // 문틀: 양옆 기둥 + 위 가로대 (개구부 바깥쪽에 붙임)
+    piece(M.doorFrame, a - jw, a, y0, doorH, t);
+    piece(M.doorFrame, b, b + jw, y0, doorH, t);
+    piece(M.doorFrame, a - jw, b + jw, y0 + doorH - .02, .16, t);
+  }
+  function piece(m2, a, b, yb, h, t) {
+    const o = mesh(UNIT_BOX, m2, 0, 0, 0, parent), len = b - a, mid = (a + b) / 2;
+    if (axis === 'x') o.scale.set(len, h, t); else o.scale.set(t, h, len);
+    o.position.set(axis === 'x' ? mid : fixed, yb + h / 2, axis === 'x' ? fixed : mid);
+    return o;
+  }
+  function segment(a, b, yb, h, full) {
+    piece(m, a, b, yb, h, WALL_T).userData.wall = true;
+    piece(M.molding, a, b, y0 + height - .14, .1, WALL_T + .06);
+    if (!full) return;
+    piece(M.baseboard, a, b, y0, .16, WALL_T + .05);
+    const len = b - a, mid = (a + b) / 2;
+    addCollider(colliderTarget, axis === 'x' ? mid : fixed, axis === 'x' ? fixed : mid, axis === 'x' ? len : WALL_T, axis === 'x' ? WALL_T : len);
+  }
+}
+// 바닥 / 천장 판
+function slab(parent, x0, x1, z0, z1, y, m, up = true) {
+  const o = mesh(UNIT_PLANE, m, (x0 + x1) / 2, y, (z0 + z1) / 2, parent);
+  o.rotation.x = up ? -Math.PI / 2 : Math.PI / 2;
+  o.scale.set(x1 - x0, z1 - z0, 1);
+  if (up) o.receiveShadow = true;
+  return o;
+}
+function room(parent, { x0, x1, z0, z1, y = 0, h = 5, wall, floor, ceil = M.ceil, doors = {} }) {
+  slab(parent, x0, x1, z0, z1, y, floor, true);
+  slab(parent, x0, x1, z0, z1, y + h, ceil, false);
+  if (doors.n !== false) wallLine(parent, 'x', z0, x0, x1, h, wall, doors.n || [], y);
+  if (doors.s !== false) wallLine(parent, 'x', z1, x0, x1, h, wall, doors.s || [], y);
+  if (doors.w !== false) wallLine(parent, 'z', x0, z0, z1, h, wall, doors.w || [], y);
+  if (doors.e !== false) wallLine(parent, 'z', x1, z0, z1, h, wall, doors.e || [], y);
+}
+
+// ---------- 소품 ----------
 function signBoard(text, w = 2.6, h = .55, { bg = '#0f0e22', fg = '#f1eee4', border = '#e0b24a', size = .5, font = FONT_SERIF } = {}) {
   const m = textPanel(w, h, (c, W, H) => {
     c.fillStyle = bg; c.fillRect(0, 0, W, H);
@@ -485,6 +603,10 @@ function signBoard(text, w = 2.6, h = .55, { bg = '#0f0e22', fg = '#f1eee4', bor
   });
   m.material.userData.own = true;
   return m;
+}
+function hangSign(parent, text, x, y, z, rotY, w = 2.6, h = .5, opts) {
+  const s = signBoard(text, w, h, opts); s.position.set(x, y, z); s.rotation.y = rotY; parent.add(s);
+  return s;
 }
 function crookedFrame(parent, text, sub, x, y, z, rotY, w = 1.3, h = 1.0) {
   const g = new THREE.Group(); g.position.set(x, y, z); g.rotation.y = rotY; parent.add(g);
@@ -513,12 +635,43 @@ function signPost(parent, x, z, rotY, lines) {
   addCollider(staticColliders, x, z, .3, .3);
   return g;
 }
+function bench(parent, x, z, rotY = 0, len = 1.8) {
+  const g = new THREE.Group(); g.position.set(x, 0, z); g.rotation.y = rotY; parent.add(g);
+  box(len, .08, .46, M.woodLight, 0, .46, 0, g);
+  for (const s of [-1, 1]) box(.08, .42, .4, M.black, s * (len / 2 - .15), .21, 0, g);
+  const side = Math.abs(Math.sin(rotY)) > .5;
+  addCollider(staticColliders, x, z, side ? .5 : len, side ? len : .5);
+}
+function planter(parent, x, z) {
+  mesh(geo('cyl', .32, .24, .55, 10), M.pot, x, .275, z, parent);
+  mesh(geo('sphere', .45, 8, 6), M.leaf, x, .95, z, parent);
+  mesh(geo('cone', .3, .7, 7), M.leafDark, x, 1.4, z, parent);
+  addCollider(staticColliders, x, z, .7, .7);
+}
+// 로프 스탠션: 기둥 + 붉은 로프 (충돌은 호출하는 쪽에서 한 번에)
+function stanchions(parent, pts, closed = false) {
+  for (const [x, z] of pts) {
+    mesh(geo('cyl', .04, .04, .95, 8), M.gold, x, .475, z, parent);
+    mesh(geo('cyl', .16, .18, .05, 10), M.gold, x, .025, z, parent);
+    mesh(geo('sphere', .06, 8, 6), M.gold, x, .98, z, parent);
+  }
+  for (let i = 0; i < pts.length - (closed ? 0 : 1); i++) {
+    const [x0, z0] = pts[i], [x1, z1] = pts[(i + 1) % pts.length];
+    const r = mesh(geo('cyl', .025, .025, 1, 6), M.rope, (x0 + x1) / 2, .84, (z0 + z1) / 2, parent);
+    r.scale.set(1, Math.hypot(x1 - x0, z1 - z0), 1);
+    r.rotation.set(0, Math.atan2(z1 - z0, -(x1 - x0)), Math.PI / 2);
+  }
+}
+// 바닥 안내선 (x0,z0)→(x1,z1) 축 정렬
+function guideLine(parent, x0, z0, x1, z1, w = .12) {
+  slab(parent, Math.min(x0, x1) - w / 2, Math.max(x0, x1) + w / 2, Math.min(z0, z1) - w / 2, Math.max(z0, z1) + w / 2, .012, M.guide);
+}
 
-// 형광등 (가끔 깜빡임)
+// 형광등 (가끔 깜빡임) / 천장등
 const tubes = [];
-function tube(parent, x, y, z, len = 2.4, rotY = 0) {
-  const t = box(len, .07, .16, M.tube, x, y, z, parent);
-  t.rotation.y = rotY;
+function tube(parent, x, y, z, len = 2.4, rotY = 0, m = M.tube) {
+  const t = box(len, .07, .16, m, x, y, z, parent);
+  t.rotation.y = rotY; t.userData.on = m;
   box(len + .1, .05, .26, M.trim, x, y + .06, z, parent).rotation.y = rotY;
   tubes.push(t);
   return t;
@@ -528,17 +681,12 @@ function updateFlicker(dt, now) {
   if (flicker) {
     flicker.t -= dt;
     const on = Math.sin(now * 0.09) > 0.2;
-    flicker.tube.material = on ? M.tube : M.tubeOff;
-    if (flicker.light) flicker.light.intensity = flicker.base * (on ? 1 : 0.35);
-    if (flicker.t <= 0) {
-      flicker.tube.material = M.tube;
-      if (flicker.light) flicker.light.intensity = flicker.base;
-      flicker = null;
-    }
+    flicker.tube.material = on ? flicker.tube.userData.on : M.tubeOff;
+    if (flicker.t <= 0) { flicker.tube.material = flicker.tube.userData.on; flicker = null; }
   } else if (Math.random() < dt * 0.35 && tubes.length) {
     const t = pick(tubes);
-    if (t.parent) {
-      flicker = { tube: t, t: rand(.15, .9), light: t.userData.light, base: t.userData.light ? t.userData.light.userData.base : 0 };
+    if (t.parent && t.parent.visible) {
+      flicker = { tube: t, t: rand(.15, .9) };
       sfx.buzz(t.getWorldPosition(new THREE.Vector3()));
     }
   }
@@ -547,11 +695,9 @@ function updateFlicker(dt, now) {
 // ---------- 로비 ----------
 let visitorBoard;
 function buildLobby() {
-  const g = new THREE.Group(); world.add(g);
-  room(g, { x0: -9, x1: 9, z0: 0, z1: 14, h: 5, wall: M.wall, floor: floorMat(0x4d477e, 9, 7), ceil: M.ceil,
-    doors: { n: [[-3, 3]], w: [[5, 9]], e: [[5, 9]] } });
-  for (const [x, z, w, d] of [[-6, 0.16, 6, .04], [6, 0.16, 6, .04], [0, 13.84, 18, .04]]) box(w, .2, d, M.trim, x, .1, z, g);
-  // 정면 현판 (메인홀 입구 위)
+  const g = zoneGroup('lobby');
+  room(g, { x0: -9, x1: 9, z0: 0, z1: 14, h: 5, wall: M.wall, floor: FLOOR.lobby, doors: { n: false, w: [[5, 9]], e: [[5, 9]] } });
+  // 정면 현판 (중앙홀 입구 위)
   const title = textPanel(6.4, 1.25, (c, W, H) => {
     c.fillStyle = '#0e0c1c'; c.fillRect(0, 0, W, H);
     c.strokeStyle = '#e0b24a'; c.lineWidth = 8; c.strokeRect(14, 14, W - 28, H - 28);
@@ -582,25 +728,23 @@ function buildLobby() {
   box(.6, .04, .42, M.cream, -1.2, 1.15, 7.7, g).rotation.y = .2;
   box(.3, .36, .24, mat(0xb3242f), -.4, 1.3, 7.55, g);
   // 방문객 카운터 전광판
-  visitorBoard = new THREE.Group(); visitorBoard.position.set(-3.8, 0, 8.6); visitorBoard.rotation.y = .35; g.add(visitorBoard);
+  visitorBoard = new THREE.Group(); visitorBoard.position.set(-3.8, 0, 8.6); visitorBoard.rotation.y = .35; visitorBoard.userData.keep = true; g.add(visitorBoard);
   box(.08, 1.6, .08, M.black, 0, .8, 0, visitorBoard);
   addCollider(staticColliders, -3.8, 8.6, .4, .4);
   setVisitorBoard('—');
 
   // 방향 표지판
-  signPost(g, 4.2, 10.2, -0.25, [['← 울음방 (신규 안치실)', .03], ['불멸의 흑역사관 → 계단 ↑', -.04], ['↑ 일반 전시관', .02]]);
-  const w = signBoard('신규 안치실 · 울음방', 3, .5); w.position.set(-8.83, 3.45, 7); w.rotation.y = Math.PI / 2; g.add(w);
-  const e = signBoard('전당 ↑  (계단 16칸, 포기 금지)', 3.4, .5, { size: .42 }); e.position.set(8.83, 3.45, 7); e.rotation.y = -Math.PI / 2; g.add(e);
-  // 액자
+  signPost(g, 4.2, 10.2, -0.25, [['← 울음방', .03], ['불멸의 흑역사관 → 계단 ↑', -.04], ['↑ 중앙홀 · 전시관', .02]]);
+  hangSign(g, '울음방 (신규 안치실)', -8.83, 3.45, 7, Math.PI / 2, 3, .5);
+  hangSign(g, '전당 ↑  (계단 16칸, 포기 금지)', 8.83, 3.45, 7, -Math.PI / 2, 3.4, .5, { size: .42 });
+  // 액자 (관장 소장품, 전시 슬롯 아님)
   crookedFrame(g, '초심', '(2019 ~ 2019)', -8.8, 2.3, 2.6, Math.PI / 2);
   crookedFrame(g, '계획표_v17_최종_진짜최종', '관장 개인 소장', -8.8, 2.3, 11.5, Math.PI / 2, 1.4, 1.0);
   crookedFrame(g, '다음 주부터', '매주 새로 걸림', 8.8, 2.3, 2.6, -Math.PI / 2);
   crookedFrame(g, '의욕 (행방불명)', '보신 분은 연락 바람', 8.8, 2.3, 11.5, -Math.PI / 2);
   crookedFrame(g, '입구', '들어오면 못 나감 (농담)', 0, 2.8, 13.82, Math.PI, 1.6, .9);
-  // 형광등
+  planter(g, -8.3, .7); planter(g, 8.3, .7);
   for (const z of [3.5, 10.5]) { tube(g, -2.5, 4.92, z); tube(g, 2.5, 4.92, z); }
-  const light = new THREE.PointLight(0xe8ecff, 16, 22, 1); light.position.set(0, 4.3, 7); light.userData.base = 16; g.add(light);
-  tubes[tubes.length - 1].userData.light = light;
 }
 function setVisitorBoard(n) {
   const old = visitorBoard.getObjectByName('screen');
@@ -617,128 +761,135 @@ function setVisitorBoard(n) {
   s.position.y = 1.9; visitorBoard.add(s);
 }
 
-// ---------- 메인홀 (동적: 작품 수에 따라 길어지고, 9점부터 가운데 칸막이 벽이 생김) ----------
-//  액자는 벽을 따라 한 줄로 이어지는 경로(뱀 모양)에 최신순으로 걸린다.
-//  새 작품이 오면 기존 액자는 같은 벽에서 한 칸씩 밀려나고, 수용량은 4칸 단위로 늘어나 재배치가 드물다.
-const HALL = { gap: 2.5, firstZ: -3.6, max: 90, frameY: 2.15 };
-let hallGroup = null, hallKey = '';
-const hallLights = [new THREE.PointLight(0xeef2ff, 14, 22, 1), new THREE.PointLight(0xeef2ff, 14, 22, 1)];
-hallLights.forEach(l => { l.userData.base = 14; scene.add(l); });
-function hallLayout(n) {
-  const spine = n > 8, lines = spine ? 4 : 2;
-  const R = spine ? Math.max(4, 4 * Math.ceil(n / (lines * 4))) : 4;
-  const len = Math.max(20, Math.ceil(-HALL.firstZ + (R - 1) * HALL.gap + 6));
-  return { spine, lines, R, len };
-}
-const HALL_LINES = {
-  2: [[-8.84, Math.PI / 2], [8.84, -Math.PI / 2]],
-  4: [[-8.84, Math.PI / 2], [-.21, -Math.PI / 2], [.21, Math.PI / 2], [8.84, -Math.PI / 2]],
-};
-function hallSlot(i, L) {
-  const line = Math.floor(i / L.R);
-  let pos = i % L.R;
-  if (line % 2) pos = L.R - 1 - pos;
-  const [x, rotY] = HALL_LINES[L.lines][line];
-  return { x, y: HALL.frameY, z: HALL.firstZ - pos * HALL.gap, rotY, line };
-}
-function ensureHallShell(n, museumEmpty, overflow) {
-  const L = hallLayout(n);
-  const key = `${L.len}|${L.spine}|${museumEmpty ? 'E' : n ? 'F' : 'e'}|${overflow}`;
-  if (key === hallKey) return L;
-  hallKey = key;
-  if (hallGroup) disposeGroup(hallGroup);
-  tubes.splice(0, tubes.length, ...tubes.filter(t => t.parent && !isInHall(t)));
-  hallGroup = new THREE.Group(); world.add(hallGroup);
-  dynamicColliders = dynamicColliders.filter(c => c.tag !== 'hall');
-  colliderTarget = dynamicColliders; colliderTag = 'hall';
-  room(hallGroup, { x0: -9, x1: 9, z0: -L.len, z1: 0, h: 5, wall: M.wall, floor: floorMat(0x423d6e, 9, L.len / 2), ceil: M.ceil, doors: { s: false } });
-  const s = signBoard('최신 실패순 전시 · 만지지 마시오 (이미 삐뚤어짐)', 5, .45, { size: .42 });
-  s.position.set(0, 3.9, -.17); s.rotation.y = Math.PI; hallGroup.add(s);
-  if (L.spine) {   // 가운데 칸막이 벽 (양면 전시)
-    const z0 = -1.9, z1 = HALL.firstZ - (L.R - 1) * HALL.gap - 1.6;
-    box(.4, 3.6, z0 - z1, M.wallDeep, 0, 1.8, (z0 + z1) / 2, hallGroup);
-    addCollider(dynamicColliders, 0, (z0 + z1) / 2, .4, z0 - z1);
-    const cap = signBoard('← 최신   ·   오래된 실패 →', 1.9, .36, { size: .44 });
-    cap.position.set(0, 2.6, z0 + .01); hallGroup.add(cap);
+// ---------- 중앙홀: 대리석 바닥, 기둥 6개, 가운데 거대한 깨진 트로피 ----------
+let emptySign = null, trophySpot = null;
+function buildHall() {
+  const g = zoneGroup('hall');
+  room(g, { x0: -11, x1: 11, z0: -24, z1: 0, h: 7, wall: M.wallHall, floor: FLOOR.marble,
+    doors: { s: [[-3, 3]], w: [[-21.85, -19.15]], e: [[-20.85, -18.15]], n: [[-6, -3], [3, 6]] } });
+  for (const x of [-6.5, 6.5]) for (const z of [-5, -12, -19]) {
+    mesh(geo('cyl', .42, .42, 6.5, 16), M.pillar, x, 3.5, z, g).castShadow = true;
+    box(1, .3, 1, M.pillarDark, x, .15, z, g);
+    box(1.05, .25, 1.05, M.pillarDark, x, 6.87, z, g);
+    addCollider(staticColliders, x, z, 1, 1);
   }
-  // 막다른 벽 문구 / 빈 박물관 연출
-  const far = -L.len + .17;
-  if (museumEmpty) {
-    const msg = textPanel(7.2, 2.1, (c, W, H) => {
-      c.fillStyle = '#0f0e22'; c.fillRect(0, 0, W, H);
-      c.strokeStyle = '#e0b24a'; c.lineWidth = 8; c.strokeRect(14, 14, W - 28, H - 28);
-      c.fillStyle = '#f3efe2'; c.textAlign = 'center'; c.textBaseline = 'middle';
-      c.font = `700 ${H * .17}px ${FONT_SERIF}`; c.fillText('아직 아무도 실패하지 않았습니다.', W / 2, H * .34);
-      c.fillStyle = '#e0b24a'; c.font = `700 ${H * .15}px ${FONT_SERIF}`; c.fillText('첫 번째 고인이 되어주세요', W / 2, H * .6);
-      c.fillStyle = '#a9a6c2'; c.font = `400 ${H * .075}px ${FONT_SANS}`; c.fillText('우측 상단 「내 실패 전시하기」', W / 2, H * .82);
-    });
-    msg.material.userData.own = true;
-    msg.position.set(0, 2.3, far); hallGroup.add(msg);
-    // 같은 문구를 입구 쪽 벽에도 (멀리서도 보이게)
-    const near = msg.clone(); near.scale.setScalar(.55); near.position.set(-8.83, 3.35, -2.4); near.rotation.y = Math.PI / 2; hallGroup.add(near);
-    const empties = [['비어 있음', '(예약 가능)'], ['공석', '고인 모집 중'], ['비어 있음', '못만 박혀 있음'], ['여기에 당신의 실패를', ''], ['공석', '관장이 닦아 둠'], ['비어 있음', '(진짜로)']];
-    empties.forEach(([t, sub], i) => {
-      const sl = hallSlot(i + 1, { lines: 2, R: 4 });
-      const e = makeEmptyFrame('wood', t, sub);
-      e.position.set(sl.x, sl.y, sl.z); e.rotation.y = sl.rotY; e.children[0].rotation.z = tiltFor('empty' + i) * 1.6;
-      hallGroup.add(e);
-    });
-  } else {
-    const txt = overflow > 0 ? `나머지 ${overflow}점은 지하 수장고에서 숙면 중` : n === 0 ? '메인홀은 아직 비어 있습니다 · 안치실에서 대기 중' : '막다른 길 · 인생처럼';
-    const end = signBoard(txt, 5.2, .5, { size: .4 });
-    end.position.set(0, 2.9, far); hallGroup.add(end);
-  }
-  for (let z = -3; z > -L.len + 1; z -= 4.6) { tube(hallGroup, -4.4, 4.92, z); tube(hallGroup, 4.4, 4.92, z); }
-  const hallTubes = tubes.filter(isInHall);
-  hallLights[0].position.set(0, 4.3, -L.len * .28); hallLights[1].position.set(0, 4.3, -L.len * .72);
-  hallTubes[0].userData.light = hallLights[0];
-  hallTubes[hallTubes.length - 1].userData.light = hallLights[1];
-  colliderTarget = staticColliders; colliderTag = null;
-  return L;
+  trophy(g, 0, -12);
+  // 조형물을 두른 로프 스탠션
+  const ring = [];
+  for (let i = 0; i < 10; i++) { const a = i / 10 * Math.PI * 2; ring.push([Math.cos(a) * 2.4, -12 + Math.sin(a) * 2.4]); }
+  stanchions(g, ring, true);
+  addCollider(staticColliders, 0, -12, 4.9, 4.9);
+  // 바닥 안내선: 입구 → 조형물, 조형물 뒤로 좌우 복도, 북쪽 두 방
+  guideLine(g, 0, -.2, 0, -9.5);
+  guideLine(g, 0, -14.5, 0, -20);
+  guideLine(g, -10.85, -20, 10.85, -20);
+  guideLine(g, -4.5, -20, -4.5, -23.85);
+  guideLine(g, 4.5, -20, 4.5, -23.85);
+  // 문 위 안내판 (홀 쪽)
+  hangSign(g, '← 후회의 회랑', -10.83, 3.55, -20.5, Math.PI / 2, 2.6, .5);
+  hangSign(g, '미완성 갤러리 →', 10.83, 3.55, -19.5, -Math.PI / 2, 2.6, .5);
+  hangSign(g, '귀찮음의 방', -4.5, 3.55, -23.83, 0, 2.2, .45);
+  hangSign(g, '마감의 방', 4.5, 3.55, -23.83, 0, 2.2, .45);
+  hangSign(g, '입구 로비 · 울음방 · 전당 ↓', 0, 3.55, -.17, Math.PI, 3.6, .45, { size: .42 });
+  signPost(g, 3.4, -3.4, -0.35, [['← 후회의 회랑', .02], ['미완성 갤러리 →', -.03], ['↑ 귀찮음의 방 · 마감의 방', .01]]);
+  bench(g, -3.6, -4.2); bench(g, 3.6, -16.8); bench(g, -3.6, -16.8);
+  for (const [x, z] of [[-10.25, -.75], [10.25, -.75], [-10.25, -23.25], [10.25, -23.25]]) planter(g, x, z);
+  // 빈 박물관 안내판 (조형물 앞)
+  emptySign = new THREE.Group(); emptySign.userData.keep = true; emptySign.position.set(0, 0, -9.9); g.add(emptySign);
+  const msg = textPanel(3.4, 1.2, (c, W, H) => {
+    c.fillStyle = '#0f0e22'; c.fillRect(0, 0, W, H);
+    c.strokeStyle = '#e0b24a'; c.lineWidth = 8; c.strokeRect(12, 12, W - 24, H - 24);
+    c.fillStyle = '#f3efe2'; c.textAlign = 'center'; c.textBaseline = 'middle';
+    c.font = `700 ${H * .16}px ${FONT_SERIF}`; c.fillText('아직 아무도 실패하지 않았습니다.', W / 2, H * .33);
+    c.fillStyle = '#e0b24a'; c.font = `700 ${H * .14}px ${FONT_SERIF}`; c.fillText('첫 번째 고인이 되어주세요', W / 2, H * .58);
+    c.fillStyle = '#a9a6c2'; c.font = `400 ${H * .085}px ${FONT_SANS}`; c.fillText('빈 액자를 조준하고 [E] · 또는 우측 상단 「내 실패 전시하기」', W / 2, H * .8, W - 40);
+  });
+  msg.material.userData.own = true; msg.position.set(0, 1.55, 0); emptySign.add(msg);
+  for (const x of [-1.5, 1.5]) box(.06, 1, .06, M.black, x, .5, -.02, emptySign);
+  for (let x = -4; x <= 4; x += 8) for (const z of [-4, -10, -16, -22]) tube(g, x, 6.92, z, 2.4);
+  trophySpot = new THREE.SpotLight(0xfff0d0, 60, 14, .42, .55, 1);
+  trophySpot.position.set(0, 6.8, -8.6); trophySpot.target.position.set(0, 2.6, -12);
+  trophySpot.castShadow = true; trophySpot.shadow.mapSize.set(1024, 1024);
+  g.add(trophySpot, trophySpot.target);
 }
-function isInHall(o) { let p = o; while (p) { if (p === hallGroup) return true; p = p.parent; } return false; }
+// 거대한 깨진 트로피: 받침대 + 컵(한쪽이 깨져 나감) + 떨어진 손잡이 + 파편
+function trophy(parent, x, z) {
+  const g = new THREE.Group(); g.position.set(x, 0, z); g.userData.keep = true; parent.add(g);
+  const add = (geom, m, px, py, pz) => { const o = mesh(geom, m, px, py, pz, g); o.castShadow = o.receiveShadow = true; return o; };
+  add(geo('box', 2.2, 1.0, 2.2), M.plinth, 0, .5, 0);
+  add(geo('box', 2.4, .12, 2.4), M.gold, 0, 1.06, 0);
+  add(geo('cyl', .7, .9, .35, 20), M.trophy, 0, 1.3, 0);
+  add(geo('cyl', .16, .22, 1.0, 14), M.trophy, 0, 1.95, 0);
+  add(geo('sphere', .3, 14, 10), M.trophy, 0, 2.5, 0);
+  const cupPts = [[.16, 0], [.55, .12], [.95, .45], [1.18, .95], [1.28, 1.5], [1.33, 1.85]].map(([r, y]) => new THREE.Vector2(r, y));
+  const cup = add(new THREE.LatheGeometry(cupPts, 28, .9, Math.PI * 2 - 1.15), M.trophy, 0, 2.7, 0);
+  cup.rotation.z = .1;
+  const h1 = add(new THREE.TorusGeometry(.42, .075, 8, 16, Math.PI), M.trophy, -1.3, 3.85, 0); h1.rotation.z = Math.PI / 2;
+  const h2 = add(new THREE.TorusGeometry(.42, .075, 8, 16, Math.PI), M.trophy, 1.55, .1, 1.35); h2.rotation.set(-Math.PI / 2, 0, .7);
+  [[.6, 1.2, .8, .22], [-.7, 1.18, .5, .16], [1.8, .08, -1.1, .2], [-1.6, .08, 1.5, .14], [.2, .08, 1.9, .12]].forEach(([px, py, pz, s], i) => {
+    const t = add(new THREE.TetrahedronGeometry(s), M.trophy, px, py, pz); t.rotation.set(i, i * 2, i * .5);
+  });
+  for (const [rz, ry] of [[0, 0], [0, Math.PI]]) {
+    const plate = textPanel(1.7, .55, (c, W, H) => {
+      c.fillStyle = '#1a1722'; c.fillRect(0, 0, W, H);
+      c.strokeStyle = '#e0b24a'; c.lineWidth = 5; c.strokeRect(8, 8, W - 16, H - 16);
+      c.fillStyle = '#f5d27a'; c.textAlign = 'center'; c.textBaseline = 'middle';
+      c.font = `700 ${H * .36}px ${FONT_SERIF}`; c.fillText('참 가 상', W / 2, H * .4);
+      c.font = `400 ${H * .17}px ${FONT_SERIF}`; c.fillStyle = '#d6cfe6'; c.fillText('실패 부문 · 수상자: 여기 온 모두', W / 2, H * .75);
+    });
+    plate.material.userData.own = true;
+    plate.position.set(0, .55, ry ? -1.111 : 1.111); plate.rotation.y = ry; g.add(plate);
+  }
+}
 
-// ---------- 신규 안치실 (관 없음: 최근 3점을 서쪽 벽에, 아래에 "방금 도착" 리본과 조화) ----------
-const MORGUE_SLOTS = [4.6, 7, 9.4].map(z => ({ x: -18.84, y: 2.05, z, rotY: Math.PI / 2 }));
-const morgueDecor = [];
+// ---------- 후회의 회랑: 폭 3m 긴 복도 (중앙홀 서쪽 → 코너 → 남쪽 울음방), 나무 바닥, 양쪽 벽 마주보는 액자 ----------
+function buildRegret() {
+  const g = zoneGroup('regret'), h = 4, W = M.wallRegret;
+  for (const [x0, x1, z0, z1] of ZONES.regret.rects) { slab(g, x0, x1, z0, z1, 0, FLOOR.wood); slab(g, x0, x1, z0, z1, h, M.ceil, false); }
+  wallLine(g, 'x', -22, -23, -11, h, W);                        // 북쪽 벽 (코너 포함)
+  wallLine(g, 'x', -19, -20, -11, h, W);                        // 첫 구간 남쪽 벽
+  wallLine(g, 'z', -23, -22, 2, h, W, [[-21.85, -19.15]]);      // 서쪽 벽 (코너에 별관 문)
+  wallLine(g, 'z', -20, -19, 2, h, W);                          // 둘째 구간 동쪽 벽
+  guideLine(g, -11, -20.5, -21.5, -20.5);
+  guideLine(g, -21.5, -20.5, -21.5, 2);
+  // 입구 아치
+  for (const z of [-21.7, -19.3]) { box(.3, 2.6, .3, M.pillarDark, -12, 1.3, z, g); addCollider(staticColliders, -12, z, .3, .3); }
+  const arch = mesh(new THREE.TorusGeometry(1.2, .14, 8, 20, Math.PI), M.pillarDark, -12, 2.6, -20.5, g);
+  arch.rotation.y = Math.PI / 2;
+  hangSign(g, '후회의 회랑', -11.88, 3.3, -20.5, Math.PI / 2, 2, .36);
+  hangSign(g, '중앙홀 →', -11.17, 3.5, -20.5, -Math.PI / 2, 1.8, .4);
+  // 코너 안내판 (양면)
+  hangSign(g, '울음방 · 로비 ↓', -21.5, 3.25, -18.2, Math.PI, 2.4, .42);
+  hangSign(g, '↑ 중앙홀', -21.5, 3.25, -18.2 - .02, 0, 2.4, .42);
+  hangSign(g, '별관 →', -23 + .17, 3.5, -20.5, Math.PI / 2, 1.6, .4);
+  for (const x of [-13.5, -16.5, -19.5]) tube(g, x, 3.92, -20.5, 1.4, 0, M.tubeWarm);
+  for (let z = -16; z <= 1; z += 3.4) tube(g, -21.5, 3.92, z, 1.4, Math.PI / 2, M.tubeWarm);
+}
+
+// ---------- 울음방 (옛 신규 안치실): 카펫, 조화와 화환, 긴 의자 ----------
 const candles = [];
 function buildMorgue() {
-  const g = new THREE.Group(); world.add(g);
-  room(g, { x0: -19, x1: -9, z0: 2, z1: 12, h: 4, wall: M.wallDeep, floor: floorMat(0x3a3a55, 5, 5), ceil: M.ceil, doors: { e: false } });
-  const s = signBoard('신규 안치실 — 방금 돌아가신 계획들', 5, .5, { size: .44 });
-  s.position.set(-18.83, 3.35, 7); s.rotation.y = Math.PI / 2; g.add(s);
-  const s2 = signBoard('여기서 우시면 됩니다 (휴지 비치)', 3.4, .42, { size: .44, border: '#8a8aa0' });
-  s2.position.set(-14, 2.6, 2.17); g.add(s2);
-  const ribbon = textPanel(.9, .2, (c, W, H) => {
-    c.fillStyle = '#111'; c.beginPath(); c.moveTo(0, 0); c.lineTo(W, 0); c.lineTo(W - 16, H / 2); c.lineTo(W, H); c.lineTo(0, H); c.lineTo(16, H / 2); c.closePath(); c.fill();
-    c.fillStyle = '#f3efe2'; c.textAlign = 'center'; c.textBaseline = 'middle'; c.font = `700 ${H * .55}px ${FONT_SERIF}`; c.fillText('방 금 도 착', W / 2, H / 2 + 1);
-  }, 300);
-  for (const sl of MORGUE_SLOTS) {
-    const r = ribbon.clone(); r.position.set(sl.x + .01, .66, sl.z); r.rotation.y = Math.PI / 2; r.visible = false; g.add(r);
-    const empty = makeEmptyFrame('wood', '안치 대기 중', '당신의 실패를 기다립니다');
-    empty.position.set(sl.x, sl.y, sl.z); empty.rotation.y = sl.rotY; g.add(empty);
-    const flowers = [];
-    for (const dz of [-.78, .78]) {   // 조화 (흰 국화 + 노란 국화) + 초
-      const f = new THREE.Group(); f.position.set(-18.5, 0, sl.z + dz); g.add(f);
-      box(.28, .5, .28, M.black, 0, .25, 0, f);
-      for (let i = 0; i < 7; i++) {
-        const a = i / 7 * Math.PI * 2;
-        mesh(geo('sphere', .09, 6, 4), i % 3 ? M.white : mat(0xf6e27a), Math.cos(a) * .12, .62 + Math.sin(i * 2.3) * .05, Math.sin(a) * .12, f);
-      }
-      mesh(geo('sphere', .1, 6, 4), M.white, 0, .7, 0, f);
-      mesh(geo('cyl', .03, .03, .16, 6), M.cream, .1, .58, 0, f);
-      const fl = mesh(geo('sphere', .03, 6, 4), M.flame, .1, .69, 0, f); fl.scale.y = 1.6; candles.push(fl);
-      f.visible = false; flowers.push(f);
+  const g = zoneGroup('morgue');
+  room(g, { x0: -23, x1: -9, z0: 2, z1: 12, h: 4, wall: M.wallDeep, floor: FLOOR.carpetCry, doors: { n: [[-22.85, -20.15]], e: false } });
+  hangSign(g, '울음방 — 방금 돌아가신 계획들이 쉬는 곳', -22.83, 3.4, 7, Math.PI / 2, 4.6, .46, { size: .42 });
+  hangSign(g, '여기서 우시면 됩니다 (휴지 비치)', -16.5, 3.35, 11.83, Math.PI, 3.4, .4, { size: .44, border: '#8a8aa0' });
+  hangSign(g, '↑ 후회의 회랑', -21.5, 3.45, 2.17, 0, 2, .4);
+  for (const zc of [4.4, 7, 9.6]) for (const dz of [-.78, .78]) {   // 조화 (흰 국화 + 노란 국화) + 초
+    const f = new THREE.Group(); f.position.set(-22.5, 0, zc + dz); g.add(f);
+    box(.28, .5, .28, M.black, 0, .25, 0, f);
+    for (let i = 0; i < 7; i++) {
+      const a = i / 7 * Math.PI * 2;
+      mesh(geo('sphere', .09, 6, 4), i % 3 ? M.white : mat(0xf6e27a), Math.cos(a) * .12, .62 + Math.sin(i * 2.3) * .05, Math.sin(a) * .12, f);
     }
-    morgueDecor.push({ ribbon: r, empty, flowers });
+    mesh(geo('sphere', .1, 6, 4), M.white, 0, .7, 0, f);
+    mesh(geo('cyl', .03, .03, .16, 6), M.cream, .1, .58, 0, f);
+    const fl = mesh(geo('sphere', .03, 6, 4), M.flame, .1, .69, 0, f); fl.scale.y = 1.6; candles.push(fl);
   }
-  addCollider(staticColliders, -18.5, 7, .5, 6);
-  for (const z of [2.6, 11.4]) wreath(g, -18.3, z);
-  const light = new THREE.PointLight(0xa9b8ff, 10, 14, 1); light.position.set(-14, 3.5, 7); g.add(light);
-  tube(g, -14, 3.92, 7, 3);
-}
-function setMorgueOccupancy(n) {
-  morgueDecor.forEach((d, i) => { d.ribbon.visible = i < n; d.empty.visible = i >= n; d.flowers.forEach(f => f.visible = i < n); });
+  addCollider(staticColliders, -22.5, 7, .5, 6.8);
+  for (const z of [2.7, 11.3]) wreath(g, -22.3, z);
+  bench(g, -15.5, 5.6, Math.PI / 2, 2); bench(g, -15.5, 8.8, Math.PI / 2, 2);
+  box(.34, .14, .2, M.white, -15.5, .57, 8.3, g);
+  tube(g, -16, 3.92, 7, 3);
 }
 function wreath(parent, x, z) {
   const g = new THREE.Group(); g.position.set(x, 0, z); g.rotation.y = Math.PI / 2; parent.add(g);
@@ -757,6 +908,123 @@ function wreath(parent, x, z) {
   addCollider(staticColliders, x, z, .5, 1);
 }
 
+// ---------- 귀찮음의 방: 침대와 이불, 어두운 조명 ----------
+function buildLazy() {
+  const g = zoneGroup('lazy');
+  room(g, { x0: -9, x1: 0, z0: -32, z1: -24, h: 3.5, wall: M.wallLazy, floor: FLOOR.carpetLazy, doors: { s: false, e: [[-29.5, -27]] } });
+  // 침대 (가운데): 프레임 + 매트리스 + 구겨진 이불 + 베개 + 헤드보드
+  box(2.3, .32, 1.5, M.woodDark, -4.5, .16, -27.6, g);
+  box(2.2, .24, 1.42, mat(0xd9d6e6), -4.5, .44, -27.6, g);
+  const blanket = box(1.5, .18, 1.46, mat(0x5a6fa8), -4.1, .62, -27.6, g); blanket.rotation.set(.04, .12, -.05);
+  mesh(geo('sphere', .35, 8, 6), mat(0x5a6fa8), -3.6, .7, -27.2, g).scale.set(1.3, .5, 1);
+  box(.5, .14, .8, M.white, -5.3, .63, -27.6, g).rotation.y = .15;
+  box(.1, 1.0, 1.5, M.woodDark, -5.65, .6, -27.6, g);
+  addCollider(staticColliders, -4.5, -27.6, 2.4, 1.6);
+  const note = textPanel(1.1, .3, (c, W, H) => {
+    c.fillStyle = '#f2ecd8'; c.fillRect(0, 0, W, H); c.fillStyle = '#1b1a22'; c.textAlign = 'center'; c.textBaseline = 'middle';
+    c.font = `700 ${H * .5}px ${FONT_SERIF}`; c.fillText('이불 밖은 위험해', W / 2, H / 2 + 1);
+  });
+  note.material.userData.own = true; note.position.set(-5.59, .95, -27.6); note.rotation.y = Math.PI / 2; g.add(note);
+  // 바닥에 벗어 둔 옷 더미
+  for (const [x, z, c] of [[-7.6, -25.2, 0x6b4a8a], [-7.3, -25.5, 0x2f4f6f], [-7.8, -25.6, 0x8a3a3a]]) mesh(geo('sphere', .3, 7, 5), mat(c), x, .12, z, g).scale.set(1.2, .35, 1);
+  addCollider(staticColliders, -7.55, -25.4, 1, .9);
+  hangSign(g, '귀찮음의 방 — 오늘은 여기까지', -4.5, 3.2, -31.83, 0, 3.4, .34, { size: .44, border: '#6a7fb0' });
+  // 알전구 하나 (어두운 방)
+  mesh(geo('cyl', .01, .01, .6, 4), M.black, -4.5, 3.2, -28, g);
+  mesh(geo('sphere', .09, 8, 6), M.tubeWarm, -4.5, 2.86, -28, g);
+}
+
+// ---------- 마감의 방: 벽시계 여러 개, 붉은 조명 ----------
+const clockHands = [];
+function buildDead() {
+  const g = zoneGroup('dead');
+  room(g, { x0: 0, x1: 9, z0: -32, z1: -24, h: 3.5, wall: M.wallDead, floor: FLOOR.carpetDead, doors: { s: false, w: false, e: [[-31.85, -29.15]] } });
+  hangSign(g, '마감의 방 — 모든 시계는 5분 빠릅니다', 4.5, 3.1, -31.83, 0, 3.6, .38, { size: .44, bg: '#1a0808', border: '#ff5a4a' });
+  for (const [x, y, z, rotY, r, fast] of [
+    [3.25, 2.55, -31.84, 0, .26, false], [5.75, 2.55, -31.84, 0, .2, true], [8.84, 2.3, -27.8, -Math.PI / 2, .38, true],
+    [.16, 3.15, -28.25, Math.PI / 2, .18, false], [4.5, 3.15, -24.16, Math.PI, .2, false], [8.84, 3.05, -25.6, -Math.PI / 2, .16, true],
+  ]) wallClock(g, x, y, z, rotY, r, fast);
+  for (const x of [2.5, 6.5]) tube(g, x, 3.42, -28, 1.6, 0, M.tubeRed);
+  // 마감 달력
+  const cal = textPanel(.7, .8, (c, W, H) => {
+    c.fillStyle = '#f7f3ea'; c.fillRect(0, 0, W, H); c.fillStyle = '#b3242f'; c.fillRect(0, 0, W, H * .22);
+    c.fillStyle = '#fff'; c.textAlign = 'center'; c.textBaseline = 'middle'; c.font = `700 ${H * .13}px ${FONT_SANS}`; c.fillText('D-DAY', W / 2, H * .11);
+    c.fillStyle = '#1b1a22'; c.font = `700 ${H * .45}px ${FONT_SERIF}`; c.fillText('어제', W / 2, H * .6);
+  });
+  cal.material.userData.own = true; cal.position.set(8.83, 1.4, -27.8); cal.rotation.y = -Math.PI / 2; g.add(cal);
+}
+function wallClock(parent, x, y, z, rotY, r, fast) {
+  const g = new THREE.Group(); g.position.set(x, y, z); g.rotation.y = rotY; g.userData.keep = true; parent.add(g);
+  const face = mesh(geo('cyl', r, r, .04, 24), M.cream, 0, 0, .02, g); face.rotation.x = Math.PI / 2;
+  const rim = mesh(geo('cyl', r * 1.12, r * 1.12, .05, 24), M.black, 0, 0, .005, g); rim.rotation.x = Math.PI / 2;
+  const hh = new THREE.Group(), mh = new THREE.Group(); hh.position.z = mh.position.z = .05; g.add(hh, mh);
+  box(r * .09, r * .55, .01, M.black, 0, r * .27, 0, hh);
+  box(r * .06, r * .85, .01, mat(0xb3242f), 0, r * .42, 0, mh);
+  hh.rotation.z = -Math.PI * 2 * (11.9 / 12); mh.rotation.z = -Math.PI * 2 * (55 / 60);
+  clockHands.push({ hh, mh, speed: fast ? rand(2, 5) : .05 });
+}
+
+// ---------- 미완성 갤러리: ㄷ자 복도, 낮은 천장, 바닥 러그, 끝은 마감의 방 문 ----------
+function buildUnfin() {
+  const g = zoneGroup('unfin'), h = 3, W = M.wallUnfin;
+  for (const [x0, x1, z0, z1] of ZONES.unfin.rects) { slab(g, x0, x1, z0, z1, 0, FLOOR.woodDark); slab(g, x0, x1, z0, z1, h, M.ceil, false); }
+  wallLine(g, 'x', -18, 11, 21, h, W);     // 첫 구간 남쪽
+  wallLine(g, 'x', -21, 11, 18, h, W);     // 첫 구간 북쪽
+  wallLine(g, 'z', 21, -32, -18, h, W);    // 둘째 구간 동쪽
+  wallLine(g, 'z', 18, -29, -21, h, W);    // 둘째 구간 서쪽
+  wallLine(g, 'x', -29, 9, 18, h, W);      // 셋째 구간 남쪽
+  wallLine(g, 'x', -32, 9, 21, h, W);      // 셋째 구간 북쪽
+  // 러그 (테두리 + 안쪽)
+  [[11.3, 19.2, -20.3, -18.7], [18.7, 20.3, -31.2, -18.9], [9.4, 19.2, -31.3, -29.7]].forEach(([x0, x1, z0, z1], i) => {
+    slab(g, x0, x1, z0, z1, .006 + i * .005, FLOOR.rugEdge);
+    slab(g, x0 + .1, x1 - .1, z0 + .1, z1 - .1, .008 + i * .005, FLOOR.rug);
+  });
+  // 이젤 + 그리다 만 캔버스
+  const e = new THREE.Group(); e.position.set(20.25, 0, -18.75); e.rotation.y = -Math.PI * .75; g.add(e);
+  for (const [dx, rz] of [[-.28, -.1], [.28, .1]]) box(.05, 1.7, .05, M.woodLight, dx, .85, 0, e).rotation.z = rz;
+  box(.05, 1.6, .05, M.woodLight, 0, .8, -.3, e).rotation.x = -.25;
+  const canvas = textPanel(.8, .6, (c, W2, H2) => {
+    c.fillStyle = '#f4f1e8'; c.fillRect(0, 0, W2, H2);
+    c.strokeStyle = '#8a8070'; c.lineWidth = 3; c.beginPath(); c.moveTo(W2 * .1, H2 * .7); c.bezierCurveTo(W2 * .3, H2 * .2, W2 * .4, H2 * .8, W2 * .45, H2 * .45); c.stroke();
+    c.fillStyle = '#6b6470'; c.textAlign = 'center'; c.font = `700 ${H2 * .1}px ${FONT_SERIF}`; c.fillText('미완성 (작가 도주)', W2 / 2, H2 * .9);
+  });
+  canvas.material.userData.own = true; canvas.position.set(0, 1.25, .04); e.add(canvas);
+  addCollider(staticColliders, 20.25, -18.75, .8, .8);
+  bench(g, 19.9, -31.4, 0, 1.4);
+  hangSign(g, '미완성 갤러리 — 끝까지 가 본 사람이 없습니다', 19.5, 2.55, -18.17, Math.PI, 2.6, .3, { size: .4, border: '#b08a3a' });
+  hangSign(g, '← 마감의 방', 12, 2.6, -30.5, Math.PI / 2, 1.8, .32);
+  for (const x of [12.5, 16]) tube(g, x, 2.93, -19.5, 1.2, 0, M.tubeWarm);
+  for (const z of [-22, -25.5, -29]) tube(g, 19.5, 2.93, z, 1.2, Math.PI / 2, M.tubeWarm);
+  for (const x of [11, 14.5]) tube(g, x, 2.93, -30.5, 1.2, 0, M.tubeWarm);
+}
+
+// ---------- 별관: 슬롯이 모자라면 후회의 회랑 코너에서 서쪽으로 늘어나는 복도 ----------
+let annexGroup = null, annexLen = 0;
+function ensureAnnex(len) {
+  len = Math.max(3, len);
+  if (len === annexLen && annexGroup) return;
+  annexLen = len;
+  if (annexGroup) { disposeGroup(annexGroup); delete zoneGroups.annex; }
+  const x0 = -23 - len, h = 4;
+  ZONES.annex.rects[0][0] = x0;
+  annexGroup = zoneGroup('annex');
+  annexGroup.visible = visibleZones.has('annex');
+  dynamicColliders = dynamicColliders.filter(c => c.tag !== 'annex');
+  colliderTarget = dynamicColliders; colliderTag = 'annex';
+  slab(annexGroup, x0, -23, -22, -19, 0, FLOOR.wood);
+  slab(annexGroup, x0, -23, -22, -19, h, M.ceil, false);
+  wallLine(annexGroup, 'x', -22, x0, -23, h, M.wallRegret);
+  wallLine(annexGroup, 'x', -19, x0, -23, h, M.wallRegret);
+  wallLine(annexGroup, 'z', x0, -22, -19, h, M.wallRegret);
+  if (len <= 3) {   // 아직 비어 있는 별관: 증축 예정 안내
+    hangSign(annexGroup, '별관 증축 예정 — 액자가 모두 차면 이 벽이 밀려납니다', x0 + .17, 2.3, -20.5, Math.PI / 2, 2.6, .5, { size: .3 });
+  } else hangSign(annexGroup, '별관 — 자리가 모자라 급히 늘렸습니다', x0 + .17, 3.3, -20.5, Math.PI / 2, 2.6, .4, { size: .36 });
+  for (let x = -24.5; x > x0 + .5; x -= 3.4) tube(annexGroup, x, 3.92, -20.5, 1.4, 0, M.tubeWarm);
+  colliderTarget = staticColliders; colliderTag = null;
+  instanceize(annexGroup);
+  mmDirty = true;
+}
+
 // ---------- 계단 + 불멸의 흑역사관 ----------
 const STAIR = { x0: 9, x1: 17, z0: 5, z1: 9, rise: 4, steps: 16 };
 const FAME_Y = STAIR.rise;
@@ -764,11 +1032,12 @@ const FAME_Y = STAIR.rise;
 const FAME_SLOTS = [
   { z: 7, y: 2.95, s: 2.0, plinth: .9 }, { z: 3.3, y: 2.6, s: 1.65, plinth: .7 }, { z: 10.7, y: 2.6, s: 1.65, plinth: .7 },
   { z: -.1, y: 2.45, s: 1.5, plinth: .5 }, { z: 14.1, y: 2.45, s: 1.5, plinth: .5 },
-].map(o => ({ ...o, x: 32.84, y: FAME_Y + o.y, rotY: -Math.PI / 2 }));
+].map((o, i) => ({ ...o, id: 'fame-' + (i + 1), zone: 'fame', x: 32.84, y: FAME_Y + o.y, rotY: -Math.PI / 2 }));
 const fameEmpty = [];
 const beams = [];
+let fameSpot = null;
 function buildStairsAndFame() {
-  const g = new THREE.Group(); world.add(g);
+  const g = zoneGroup('stairs');
   const n = STAIR.steps, sd = (STAIR.x1 - STAIR.x0) / n, sh = STAIR.rise / n;
   for (let i = 0; i < n; i++) {
     const h = (i + 1) * sh;
@@ -780,16 +1049,16 @@ function buildStairsAndFame() {
   const cheer = signBoard('거의 다 왔습니다 (거짓말)', 3, .45, { size: .44 });
   cheer.position.set(13, 5.2, 5.17); g.add(cheer);
   crookedFrame(g, '계단 오르기 챌린지', '1일 만에 종료', 13, 4.2, 8.83, Math.PI, 1.2, .8);
-  const stairLight = new THREE.PointLight(0xffd9a0, 8, 12, 1); stairLight.position.set(13, 6.5, 7); g.add(stairLight);
 
-  room(g, { x0: 17, x1: 33, z0: -3, z1: 17, y: FAME_Y, h: 7, wall: M.fameWall, floor: floorMat(0x6b2a38, 8, 10), ceil: mat(0x1c0a10),
+  const f = zoneGroup('fame');
+  room(f, { x0: 17, x1: 33, z0: -3, z1: 17, y: FAME_Y, h: 7, wall: M.fameWall, floor: FLOOR.fame, ceil: mat(0x1c0a10),
     doors: { w: [[5, 9]] } });
   for (const [x, z, w, d] of [[25, -2.84, 16, .04], [25, 16.84, 16, .04], [32.84, 7, .04, 20]]) {
-    box(w, .12, d, M.gold, x, FAME_Y + .06, z, g); box(w, .1, d, M.gold, x, FAME_Y + 6.6, z, g);
+    box(w, .12, d, M.gold, x, FAME_Y + .06, z, f); box(w, .1, d, M.gold, x, FAME_Y + 6.6, z, f);
   }
   // 붉은 카펫
-  box(31.6 - 17.2, .03, 2.4, M.carpet, (17.2 + 31.6) / 2, FAME_Y + .015, 7, g);
-  for (const dz of [-1.25, 1.25]) box(31.6 - 17.2, .035, .1, M.gold, (17.2 + 31.6) / 2, FAME_Y + .02, 7 + dz, g);
+  box(31.6 - 17.2, .03, 2.4, M.carpet, (17.2 + 31.6) / 2, FAME_Y + .015, 7, f);
+  for (const dz of [-1.25, 1.25]) box(31.6 - 17.2, .035, .1, M.gold, (17.2 + 31.6) / 2, FAME_Y + .02, 7 + dz, f);
   const banner = textPanel(7, 1.1, (c, W, H) => {
     const grd = c.createLinearGradient(0, 0, 0, H); grd.addColorStop(0, '#3a0d16'); grd.addColorStop(1, '#1d060b');
     c.fillStyle = grd; c.fillRect(0, 0, W, H);
@@ -798,65 +1067,174 @@ function buildStairsAndFame() {
     c.font = `700 ${H * .38}px ${FONT_SERIF}`; c.fillText('불멸의 흑역사관', W / 2, H * .42);
     c.font = `400 ${H * .14}px ${FONT_SERIF}`; c.fillStyle = '#e9c9a0'; c.fillText('HALL OF IMMORTAL FAILURES · 공감으로 영생을 얻은 자들', W / 2, H * .76);
   });
-  banner.position.set(32.83, FAME_Y + 5.85, 7); banner.rotation.y = -Math.PI / 2; g.add(banner);
+  banner.position.set(32.83, FAME_Y + 5.85, 7); banner.rotation.y = -Math.PI / 2; f.add(banner);
   FAME_SLOTS.forEach((sl, i) => {
     // 순위 숫자 받침대
-    box(1.0, sl.plinth, 1.5, i === 0 ? M.gold : mat(0x2a1a22), 32.35, FAME_Y + sl.plinth / 2, sl.z, g);
-    box(1.06, .06, 1.56, M.gold, 32.35, FAME_Y + sl.plinth, sl.z, g);
+    box(1.0, sl.plinth, 1.5, i === 0 ? M.gold : mat(0x2a1a22), 32.35, FAME_Y + sl.plinth / 2, sl.z, f);
+    box(1.06, .06, 1.56, M.gold, 32.35, FAME_Y + sl.plinth, sl.z, f);
     const num = textPanel(.8, .4, (c, W, H) => {
       c.fillStyle = i === 0 ? '#2a1a0a' : '#e8b84a'; c.textAlign = 'center'; c.textBaseline = 'middle';
       c.font = `700 ${H * .8}px ${FONT_SERIF}`; c.fillText(`${i + 1}위`, W / 2, H / 2);
     });
     num.material.userData.own = true;
-    num.position.set(31.84, FAME_Y + sl.plinth / 2, sl.z); num.rotation.y = -Math.PI / 2; g.add(num);
+    num.position.set(31.84, FAME_Y + sl.plinth / 2, sl.z); num.rotation.y = -Math.PI / 2; f.add(num);
     addCollider(staticColliders, 32.35, sl.z, 1.06, 1.56);
     // 빈 자리 (공석)
     const e = makeEmptyFrame('gold', '공석', '공감 1개면 바로 입성');
-    e.position.set(sl.x, sl.y, sl.z); e.rotation.y = sl.rotY; e.scale.setScalar(sl.s); g.add(e);
+    e.position.set(sl.x, sl.y, sl.z); e.rotation.y = sl.rotY; e.scale.setScalar(sl.s); e.userData.keep = true; f.add(e);
     fameEmpty.push(e);
     // 스포트라이트 빛기둥 (가짜 볼륨 조명)
-    const beam = mesh(geo('cone', i === 0 ? 1.6 : 1.3, 7, 12, 1, true), M.beam, 31.9, FAME_Y + 3.5, sl.z, g);
+    const beam = mesh(geo('cone', i === 0 ? 1.6 : 1.3, 7, 12, 1, true), M.beam, 31.9, FAME_Y + 3.5, sl.z, f);
     beam.userData.phase = i;
     beams.push(beam);
   });
   for (const z of [5.4, 8.6]) for (let x = 20; x < 26; x += 2) {
-    box(.08, .9, .08, M.gold, x, FAME_Y + .45, z, g);
-    mesh(geo('sphere', .07, 6, 4), M.gold, x, FAME_Y + .95, z, g);
-    if (x + 2 < 26) box(2, .05, .05, M.carpet, x + 1, FAME_Y + .8, z, g);
+    box(.08, .9, .08, M.gold, x, FAME_Y + .45, z, f);
+    mesh(geo('sphere', .07, 6, 4), M.gold, x, FAME_Y + .95, z, f);
+    if (x + 2 < 26) box(2, .05, .05, M.carpet, x + 1, FAME_Y + .8, z, f);
   }
   for (const z of [5.4, 8.6]) addCollider(staticColliders, 23, z, 6, .15);
-  crookedFrame(g, '명예의 전당 입성 조건', '공감 많이 받기 (그게 다임)', 17.2, FAME_Y + 2.4, 13, Math.PI / 2, 1.4, 1);
-  crookedFrame(g, '여기까지 온 당신도', '사실 대단한 겁니다', 17.2, FAME_Y + 2.4, 1, Math.PI / 2, 1.4, 1);
-  const s1 = new THREE.SpotLight(0xffd27a, 70, 18, .75, .5, 1); s1.position.set(28.5, FAME_Y + 6.8, 7); s1.target.position.set(32.8, FAME_Y + 2.5, 7);
+  crookedFrame(f, '명예의 전당 입성 조건', '공감 많이 받기 (그게 다임)', 17.2, FAME_Y + 2.4, 13, Math.PI / 2, 1.4, 1);
+  crookedFrame(f, '여기까지 온 당신도', '사실 대단한 겁니다', 17.2, FAME_Y + 2.4, 1, Math.PI / 2, 1.4, 1);
+  fameSpot = new THREE.SpotLight(0xffd27a, 70, 18, .75, .5, 1); fameSpot.position.set(28.5, FAME_Y + 6.8, 7); fameSpot.target.position.set(32.8, FAME_Y + 2.5, 7);
   const warm = new THREE.PointLight(0xff9a7a, 12, 18, 1); warm.position.set(21, FAME_Y + 5, 7);
-  g.add(s1, s1.target, warm);
+  fameSpot.castShadow = true; fameSpot.shadow.mapSize.set(1024, 1024);
+  f.add(fameSpot, fameSpot.target, warm);
 }
 function setFameOccupancy(n) { fameEmpty.forEach((e, i) => e.visible = i >= n); }
 
-// ---------- 구역 판정 ----------
-const ZONES = { lobby: '입구 로비', hall: '메인홀 · 일반 전시관', morgue: '신규 안치실', stairs: '전당 가는 계단', fame: '불멸의 흑역사관' };
-function zoneAt(x, z) {
-  if (x >= STAIR.x1) return 'fame';
-  if (x > STAIR.x0) return 'stairs';
-  if (x < -9) return 'morgue';
-  if (z < 0) return 'hall';
-  return 'lobby';
+function buildWorld() {
+  buildLobby();
+  buildHall();
+  buildRegret();
+  buildMorgue();
+  buildLazy();
+  buildDead();
+  buildUnfin();
+  buildStairsAndFame();
+  for (const g of Object.values(zoneGroups)) instanceize(g);
+  ensureAnnex(3);
 }
+
+// ================================================================
+//  전시 슬롯: 작품을 걸 수 있는 벽 자리 (구역 · 위치 · 방향 · 크기)
+//   id는 DB(exhibits.slot_id)에 저장되므로 한 번 정한 id는 바꾸지 말 것 (새 자리는 뒤에 추가만).
+//   전당은 슬롯이 없다 (공감 상위 5개 자동 배치).
+// ================================================================
+const SLOTS = [], SLOT = new Map();
+// side: 벽이 방의 어느 쪽인지(w/e/n/s), fixed: 벽 중심선 좌표, list: 벽을 따라 놓을 좌표들
+function wallRun(zone, prefix, side, fixed, list, { y = 1.85, view = 1.9, s = 1 } = {}) {
+  const off = WALL_T / 2 + .01;
+  for (const t of list) {
+    const n = SLOTS.filter(q => q.prefix === prefix).length + 1;
+    const sl = { id: `${prefix}-${String(n).padStart(2, '0')}`, prefix, zone, y, s, view,
+      x: side === 'w' ? fixed + off : side === 'e' ? fixed - off : t,
+      z: side === 'n' ? fixed + off : side === 's' ? fixed - off : t,
+      rotY: { w: Math.PI / 2, e: -Math.PI / 2, n: 0, s: Math.PI }[side] };
+    SLOTS.push(sl); SLOT.set(sl.id, sl);
+  }
+}
+{
+  const HALL_Z = [-2.6, -5, -7.4, -9.8, -12.2, -14.6, -17], big = { y: 2.1, view: 2.6 };
+  wallRun('lobby', 'lobby', 's', 14, [-6.5, -4, 4, 6.5], big);
+  wallRun('hall', 'hall', 'w', -11, HALL_Z, big);
+  wallRun('hall', 'hall', 'e', 11, HALL_Z, big);
+  wallRun('hall', 'hall', 'n', -24, [-9, -1.3, 1.3, 9], big);
+  wallRun('hall', 'hall', 's', 0, [-9, -6.2, 6.2, 9], big);
+  const REG_Z = [-16.6, -14.2, -11.8, -9.4, -7, -4.6, -2.2, .2];
+  wallRun('regret', 'regret', 'n', -22, [-12.8, -15.2, -17.6, -21.5]);
+  wallRun('regret', 'regret', 's', -19, [-12.8, -15.2, -17.6]);
+  wallRun('regret', 'regret', 'w', -23, REG_Z);
+  wallRun('regret', 'regret', 'e', -20, REG_Z);
+  wallRun('morgue', 'cry', 'w', -23, [4.4, 7, 9.6], { view: 2.4 });
+  wallRun('morgue', 'cry', 's', 12, [-20, -16.5, -13], { view: 2.4 });
+  wallRun('morgue', 'cry', 'n', 2, [-16.5, -13], { view: 2.4 });
+  wallRun('lazy', 'lazy', 'n', -32, [-7, -4.5, -2]);
+  wallRun('lazy', 'lazy', 'w', -9, [-29.8, -27]);
+  wallRun('lazy', 'lazy', 'e', 0, [-25.4]);
+  wallRun('lazy', 'lazy', 's', -24, [-8, -1.5]);
+  wallRun('dead', 'dead', 'n', -32, [2, 4.5, 7]);
+  wallRun('dead', 'dead', 'e', 9, [-25.6]);
+  wallRun('dead', 'dead', 'w', 0, [-31, -25.4]);
+  wallRun('dead', 'dead', 's', -24, [1.5, 7.8]);
+  const UN_Z = [-22.6, -25, -27.4];
+  wallRun('unfin', 'unfin', 'n', -21, [13, 15.6], { y: 1.75 });
+  wallRun('unfin', 'unfin', 's', -18, [13, 15.6], { y: 1.75 });
+  wallRun('unfin', 'unfin', 'e', 21, UN_Z, { y: 1.75 });
+  wallRun('unfin', 'unfin', 'w', 18, UN_Z, { y: 1.75 });
+  wallRun('unfin', 'unfin', 'n', -32, [10.8, 13.2, 15.6, 18], { y: 1.75 });
+  wallRun('unfin', 'unfin', 's', -29, [10.8, 13.2, 15.6], { y: 1.75 });
+}
+const STATIC_SLOT_COUNT = SLOTS.length;
+// 별관 슬롯 k: 북쪽/남쪽 벽을 번갈아 2.2m 간격 (결정적이라 모든 방문자 화면에서 같은 자리)
+function annexSlot(k) {
+  const id = 'annex-' + String(k + 1).padStart(3, '0');
+  if (SLOT.has(id)) return SLOT.get(id);
+  const north = k % 2 === 0, x = -24.6 - Math.floor(k / 2) * 2.2;
+  const sl = { id, prefix: 'annex', zone: 'annex', y: 1.85, s: 1, view: 1.9, x, z: north ? -22 + WALL_T / 2 + .01 : -19 - WALL_T / 2 - .01, rotY: north ? 0 : Math.PI };
+  SLOT.set(id, sl);
+  return sl;
+}
+const annexLenFor = count => count ? 3 + Math.ceil(count / 2) * 2.2 : 3;
+
+// ---------- 구역 판정 ----------
 let currentZone = 'lobby';
 function updateZone() {
-  const z = zoneAt(player.x, player.z);
-  if (z === currentZone) return;
+  const z = zoneAt(camera.position.x, camera.position.z);
+  if (!z || z === currentZone) return;
   const prev = currentZone;
   currentZone = z;
-  $('#zone').textContent = ZONES[z];
+  $('#zone').textContent = ZONES[z].name;
+  applyCulling(z);
   onZoneChange(z, prev);
 }
 
-// 형광등 깜빡임, 촛불, 빛기둥 같은 분위기 애니메이션
+// ---------- 카메라 이동 경로: 문과 코너를 지나가도록 (벽을 뚫지 않게) ----------
+function doorSides(d, zone) {
+  const off = k => d.axis === 'x' ? { x: d.x, z: d.z + k } : { x: d.x + k, z: d.z };
+  const a = off(1.1), b = off(-1.1);
+  return rectIndex(zone, a.x, a.z) >= 0 ? [a, b] : [b, a];
+}
+function withinZone(zone, a, b) {
+  const Z = ZONES[zone];
+  if (!Z.corners) return [];
+  const i = rectIndex(zone, a.x, a.z), j = rectIndex(zone, b.x, b.z);
+  if (i < 0 || j < 0 || i === j) return [];
+  const out = [];
+  if (i < j) for (let k = i; k < j; k++) out.push(Z.corners[k]); else for (let k = i - 1; k >= j; k--) out.push(Z.corners[k]);
+  return out.map(([x, z]) => ({ x, z }));
+}
+function routePoints(from, to) {
+  const za = zoneAt(from.x, from.z) || currentZone, zb = zoneAt(to.x, to.z) || za;
+  const prev = new Map([[za, null]]), q = [za];
+  while (q.length) {
+    const z = q.shift();
+    if (z === zb) break;
+    for (const d of DOORS) {
+      const n = d.a === z ? d.b : d.b === z ? d.a : null;
+      if (n && !prev.has(n)) { prev.set(n, { z, d }); q.push(n); }
+    }
+  }
+  const hops = [];
+  for (let z = zb; prev.get(z); z = prev.get(z).z) hops.unshift(prev.get(z));
+  const pts = [];
+  let cur = from, zone = za;
+  for (const { d } of hops) {
+    const [p0, p1] = doorSides(d, zone);
+    pts.push(...withinZone(zone, cur, p0), p0, p1);
+    cur = p1; zone = d.a === zone ? d.b : d.a;
+  }
+  pts.push(...withinZone(zone, cur, to));
+  return pts;
+}
+
+// 형광등 깜빡임, 촛불, 빛기둥, 시계 같은 분위기 애니메이션
 function updateAmbient(dt, now) {
   updateFlicker(dt, now);
-  for (const c of candles) if (c.parent && c.parent.visible) c.scale.set(1 + Math.sin(now * .013 + c.id) * .15, 1.6 + Math.sin(now * .021 + c.id) * .3, 1);
+  for (const c of candles) if (zoneGroups.morgue.visible) c.scale.set(1 + Math.sin(now * .013 + c.id) * .15, 1.6 + Math.sin(now * .021 + c.id) * .3, 1);
   for (const b of beams) b.material.opacity = .08 + Math.sin(now * .002 + b.userData.phase) * .02;
+  if (zoneGroups.dead.visible) for (const c of clockHands) { c.mh.rotation.z -= dt * c.speed; c.hh.rotation.z -= dt * c.speed / 12; }
+  confetti.visible = visibleZones.has('fame');
   if (currentZone === 'fame' || currentZone === 'stairs') updateConfetti(dt, now / 1000);
 }
 
@@ -1142,13 +1520,11 @@ function updateFrameContent(now) {
 }
 
 // ---------- 배치 / 애니메이션 ----------
-function placeFrame(f, slot, { drop = false, tween = false } = {}) {
-  const to = new THREE.Vector3(slot.x, slot.y, slot.z);
-  const sameWall = f.slot && f.slot.rotY === slot.rotY && f.slot.line === slot.line;
+function placeFrame(f, slot, { drop = false } = {}) {
+  if (f.slot === slot && !drop) return;
   f.group.rotation.y = slot.rotY;
   f.group.scale.setScalar(slot.s || 1);
-  if (tween && sameWall && f.group.position.distanceTo(to) > .01) f.move = { from: f.group.position.clone(), to, t: 0 };
-  else { f.move = null; f.group.position.copy(to); if (tween && !sameWall) drop = true; }
+  f.move = null; f.group.position.set(slot.x, slot.y, slot.z);
   if (drop) { f.anim = { t: 0, dur: .95, h: .9, swing: (hashId(f.id) & 1 ? 1 : -1) * .35, landed: false }; f.inner.position.y = .9; }
   f.slot = slot;
 }
@@ -1161,6 +1537,7 @@ function easeOutBounce(x) {
 }
 function updateFrames(dt, now) {
   for (const f of frames.values()) {
+    f.group.visible = visibleZones.has(f.zone);
     if (f.anim) {   // 살짝 떨어지며 걸리는 애니메이션
       const a = f.anim; a.t += dt;
       const k = Math.min(1, a.t / a.dur);
@@ -1186,7 +1563,7 @@ function anchorFor(id) {
   return new THREE.Vector3(s.x + Math.sin(s.rotY) * .45, s.y + FRAME.h * sc * .5 + .1, s.z + Math.cos(s.rotY) * .45);
 }
 
-// ---------- 배치 규칙: 전당 상위 5 (공감 ≥ 1) / 안치실 최신 3 / 나머지 메인홀 (최신순) ----------
+// ---------- 배치 규칙: 전당 상위 5 (공감 ≥ 1) / 나머지는 전시 슬롯에 최신순 ----------
 let exhibits = [];
 const exIndex = new Map();
 const placement = new Map();
@@ -1199,13 +1576,12 @@ function layoutAll({ animate = new Set(), initial = false } = {}) {
   const fame = topFive();
   const fameIds = new Set(fame.map(e => e.id));
   const rest = exhibits.filter(e => !fameIds.has(e.id)).sort(byNewest);
-  const morgue = rest.slice(0, MORGUE_SLOTS.length);
-  const hallAll = rest.slice(MORGUE_SLOTS.length), hall = hallAll.slice(0, HALL.max);
-  const L = ensureHallShell(hall.length, exhibits.length === 0, hallAll.length - hall.length);
   const want = new Map();
   fame.forEach((e, i) => want.set(e.id, { style: 'fame', rank: i, zone: 'fame', slot: FAME_SLOTS[i] }));
-  morgue.forEach((e, i) => want.set(e.id, { style: 'normal', rank: -1, zone: 'morgue', slot: MORGUE_SLOTS[i] }));
-  hall.forEach((e, i) => want.set(e.id, { style: 'normal', rank: -1, zone: 'hall', slot: hallSlot(i, L) }));
+  rest.slice(0, SLOTS.length).forEach((e, i) => want.set(e.id, { style: 'normal', rank: -1, zone: SLOTS[i].zone, slot: SLOTS[i] }));
+  applyLayout(want, { animate, initial });
+}
+function applyLayout(want, { animate, initial }) {
   for (const [id, f] of frames) if (!want.has(id)) { destroyFrame(f); frames.delete(id); }
   for (const [id, w] of want) {
     const ex = exIndex.get(id);
@@ -1213,17 +1589,16 @@ function layoutAll({ animate = new Set(), initial = false } = {}) {
     if (f && f.style !== w.style) { destroyFrame(f); frames.delete(id); f = null; }
     const isNew = !f;
     if (isNew) { f = createFrame(ex, w.style, w.rank); frames.set(id, f); }
-    const zoneChanged = f.zone && f.zone !== w.zone;
+    const moved = f.slot && f.slot !== w.slot;
     f.ex = ex; f.fm.userData.exhibit = ex; f.rank = w.rank; f.zone = w.zone;
-    placeFrame(f, w.slot, { drop: !initial && (animate.has(id) || (isNew && !initial) || zoneChanged), tween: !isNew && !zoneChanged });
+    placeFrame(f, w.slot, { drop: !initial && (animate.has(id) || isNew || moved) });
   }
-  setMorgueOccupancy(morgue.length);
-  setFameOccupancy(fame.length);
+  setFameOccupancy([...want.values()].filter(w => w.style === 'fame').length);
+  if (emptySign) emptySign.visible = exhibits.length === 0;
   // 소장 번호(등록순)와 위치
   placement.clear();
   const no = new Map([...exhibits].sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt)).map((e, i) => [e.id, i + 1]));
-  for (const [id, w] of want) placement.set(id, { zone: w.zone, rank: w.rank, no: no.get(id) });
-  for (const e of hallAll.slice(HALL.max)) placement.set(e.id, { zone: 'storage', rank: -1, no: no.get(e.id) });
+  for (const [id, w] of want) placement.set(id, { zone: w.zone, rank: w.rank, no: no.get(id), slot: w.slot });
   collectHits();
 }
 
@@ -1258,12 +1633,64 @@ function updateConfetti(dt, t) {
 function confettiBurst() { cf.forEach(p => { p.y = rand(FAME_Y + 4, FAME_Y + 7); p.boost = rand(0, 1.5); }); }
 
 // 조명
-scene.add(new THREE.HemisphereLight(0xb8b4ff, 0x2a2140, 2.2));
+const hemi = new THREE.HemisphereLight(0xb8b4ff, 0x2a2140, 1.6);
+scene.add(hemi);
+
+// ================================================================
+//  구역 조명 풀: 실제 PointLight 몇 개만 두고, 플레이어 주변 구역의 조명 자리로 옮겨 가며 쓴다
+//   (광원 개수가 늘 같아서 셰이더 재컴파일이 없고, 켜고 끌 때 intensity를 서서히 바꿔 팝핑이 없음)
+// ================================================================
+class LightPool {
+  constructor(make, n) {
+    this.items = Array.from({ length: n }, () => { const l = make(); l.intensity = 0; scene.add(l); if (l.target) scene.add(l.target); return { l, cur: null, want: null, level: 0 }; });
+  }
+  assign(targets) {
+    const rest = new Set(targets), free = [];
+    for (const it of this.items) { if (it.want && rest.has(it.want)) rest.delete(it.want); else free.push(it); }
+    for (const it of free) it.want = null;
+    for (const t of rest) { const it = free.shift(); if (!it) break; it.want = t; }
+  }
+  update(dt, place, strength) {
+    for (const it of this.items) {
+      if (it.cur !== it.want) {
+        it.level = Math.max(0, it.level - dt * 4);
+        if (it.level === 0) { it.cur = it.want; if (it.cur) place(it.l, it.cur); }
+      } else if (it.cur) it.level = Math.min(1, it.level + dt * 2.5);
+      it.l.intensity = it.cur ? strength(it.cur) * it.level : 0;
+    }
+  }
+  get active() { return this.items.filter(it => it.l.intensity > 0.001).length; }
+}
+// [구역, x, y, z, 색, 세기, 거리]
+const ZONE_LIGHTS = [
+  ['lobby', 0, 4.3, 3.5, 0xe8ecff, 14, 16], ['lobby', 0, 4.3, 10.5, 0xe8ecff, 14, 16],
+  ['hall', -5, 6, -6, 0xeef2ff, 18, 20], ['hall', 5, 6, -6, 0xeef2ff, 18, 20], ['hall', -5, 6, -18, 0xeef2ff, 18, 20], ['hall', 5, 6, -18, 0xeef2ff, 18, 20],
+  ['regret', -15.5, 3.5, -20.5, 0xffd9a8, 8, 10], ['regret', -21.5, 3.5, -12, 0xffd9a8, 8, 10], ['regret', -21.5, 3.5, -2, 0xffd9a8, 8, 10],
+  ['morgue', -16, 3.5, 7, 0xa9b8ff, 10, 14],
+  ['lazy', -4.5, 2.8, -28, 0x8fa0d8, 5, 9],
+  ['dead', 4.5, 3.2, -28, 0xff5040, 10, 10],
+  ['unfin', 14.5, 2.7, -19.5, 0xffd0a0, 7, 9], ['unfin', 19.5, 2.7, -25, 0xffd0a0, 7, 9], ['unfin', 13.5, 2.7, -30.5, 0xffd0a0, 7, 9],
+  ['stairs', 13, 6.5, 7, 0xffd9a0, 8, 12],
+  ['annex', -26, 3.5, -20.5, 0xffd9a8, 7, 10],
+].map(([zone, x, y, z, color, i, d]) => ({ zone, x, y, z, color, i, d }));
+const zonePool = new LightPool(() => new THREE.PointLight(0xffffff, 0, 10, 1), isTouch ? 3 : 4);
+let lastZoneAssign = 0;
+function updateZoneLights(dt, now) {
+  if (now - lastZoneAssign > 400) {
+    lastZoneAssign = now;
+    const cx = camera.position.x, cz = camera.position.z;
+    const cand = ZONE_LIGHTS.filter(a => visibleZones.has(a.zone))
+      .map(a => ({ a, k: (a.zone === currentZone ? 0 : 100) + Math.hypot(a.x - cx, a.z - cz) }))
+      .sort((p, q) => p.k - q.k).slice(0, zonePool.items.length).map(p => p.a);
+    zonePool.assign(cand);
+  }
+  zonePool.update(dt, (l, a) => { l.position.set(a.x, a.y, a.z); l.color.setHex(a.color); l.distance = a.d; }, a => a.i);
+}
 
 // ================================================================
 //  플레이어 이동 (데스크톱: PointerLock / 모바일: 조이스틱 + 드래그)
 // ================================================================
-const player = { x: 0, z: 11.5, y: 0, radius: 0.35, eye: 1.6, speed: 3.6, bob: 0, frozen: false, lastMove: performance.now() };
+const player = { x: 0, z: 11.5, y: 0, radius: 0.3, eye: 1.6, speed: 3.6, bob: 0, frozen: false, lastMove: performance.now() };
 const keys = new Set();
 const controls = new PointerLockControls(camera, document.body);
 controls.pointerSpeed = 0.8;
@@ -1292,6 +1719,7 @@ addEventListener('keydown', e => {
   }
   if (inField) return;
   if (e.code === 'KeyQ') { if (started && !e.repeat) goBack({ relock: true }); return; }
+  if (e.code === 'KeyM' && started && !e.repeat) { if (mm.big) setMapBig(false); else setMapCollapsed(!mm.collapsed); return; }
   if (e.code === 'KeyE' && started && !e.repeat) interact();
   keys.add(e.code);
 });
@@ -1631,7 +2059,7 @@ function hasBanned(text) {
 const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 function placeLabel(p) {
   if (!p) return '';
-  return { fame: `불멸의 흑역사관 ${p.rank + 1}위`, morgue: '신규 안치실', hall: '메인홀', storage: '지하 수장고' }[p.zone] || '';
+  return p.zone === 'fame' ? `불멸의 흑역사관 ${p.rank + 1}위` : ZONES[p.zone] ? ZONES[p.zone].name : '';
 }
 
 // ================================================================
@@ -1640,15 +2068,23 @@ function placeLabel(p) {
 const raycaster = new THREE.Raycaster();
 const _ndc = new THREE.Vector2();
 let hitList = [], hovered = null, lastRay = 0, uiOpen = null, selected = null, camTween = null;
+// 벽(InstancedMesh)도 함께 검사해서 벽 너머의 액자는 집히지 않게 한다
 function collectHits() {
   hitList = [...frames.values()].map(f => f.fm);
   if (npc.hit) hitList.push(npc.hit);
+  world.traverse(o => { if (o.isInstancedMesh && o.userData.wall) hitList.push(o); });
 }
 function pickAt(nx, ny, far) {
   raycaster.setFromCamera(_ndc.set(nx, ny), camera);
   raycaster.far = far;
-  const h = raycaster.intersectObjects(hitList, false)[0];
-  return h ? h.object.userData.exhibit : null;
+  for (const h of raycaster.intersectObjects(hitList, false)) {
+    let shown = true;
+    for (let o = h.object; o; o = o.parent) if (!o.visible) { shown = false; break; }
+    if (!shown && !h.object.userData.exhibit?.npc) continue;
+    if (h.object.userData.wall) return null;
+    return h.object.userData.exhibit || null;
+  }
+  return null;
 }
 function updateHover(now) {
   if (now - lastRay < 90 || uiOpen || camTween) return;
@@ -1908,8 +2344,8 @@ async function submitRegister(e) {
   closeUI();
   const f = frames.get(ex.id);
   if (f) {
-    const s = f.slot, nx = Math.sin(s.rotY), nz = Math.cos(s.rotY);
-    flyTo(new THREE.Vector3(s.x + nx * 3.1, floorAt(s.x + nx * 3.1, s.z + nz * 3.1) + 1.7, s.z + nz * 3.1), new THREE.Vector3(s.x, s.y - .25, s.z), () => {
+    const v = viewPointOf(f.slot);
+    flyTo(v.pos, v.look, () => {
       director('registered', ex);
       sfx.trombone();
       setHint(defaultHint());
@@ -1960,18 +2396,18 @@ function updateCounts() {
   }
 }
 
-// 카메라를 곡선 경로로 부드럽게 이동 (로비 문을 지나 안치실까지)
+// 카메라를 곡선 경로로 부드럽게 이동 (문과 복도 코너를 거쳐서, 벽을 뚫지 않게)
 function flyTo(pos, lookAt, done) {
   const start = camera.position.clone();
-  const pts = [start];
-  const z = zoneAt(player.x, player.z);
-  if (z === 'fame' || z === 'stairs') pts.push(new THREE.Vector3(15, 5.4, 7), new THREE.Vector3(8, 1.8, 7));
-  if (z === 'hall') pts.push(new THREE.Vector3(player.x > 0 ? 2 : -2, 1.8, -.5), new THREE.Vector3(-2, 1.8, 5));
-  if (z !== 'morgue') pts.push(new THREE.Vector3(-8.2, 1.8, 7));
-  pts.push(pos);
-  const curve = new THREE.CatmullRomCurve3(pts, false, 'centripetal');
+  const way = routePoints({ x: start.x, z: start.z }, { x: pos.x, z: pos.z }).map(p => new THREE.Vector3(p.x, floorAt(p.x, p.z) + player.eye, p.z));
+  const curve = new THREE.CatmullRomCurve3([start, ...way, pos], false, 'centripetal');
   const toQ = new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().lookAt(pos, lookAt, camera.up));
-  camTween = { t: 0, dur: clamp(1.2 + curve.getLength() / 12, 1.4, 3.2), curve, fromQ: camera.quaternion.clone(), toQ, done };
+  camTween = { t: 0, dur: clamp(1 + curve.getLength() / 11, 1.2, 4.5), curve, fromQ: camera.quaternion.clone(), toQ, done };
+}
+// 슬롯 앞 관람 위치
+function viewPointOf(s) {
+  const d = s.view || 2.2, x = s.x + Math.sin(s.rotY) * d, z = s.z + Math.cos(s.rotY) * d;
+  return { pos: new THREE.Vector3(x, floorAt(x, z) + player.eye, z), look: new THREE.Vector3(s.x, s.y - .2, s.z) };
 }
 function updateCamTween(dt) {
   const tw = camTween;
@@ -2254,10 +2690,44 @@ const LINES = {
     '넥타이가 검은 건 매일이 장례식이라서입니다.',
   ],
 };
+Object.assign(LINES, {
+  regret: [
+    '후회의 회랑입니다. 길죠? 후회도 원래 깁니다.',
+    '양쪽 액자가 마주 보고 있습니다. 서로 "너도냐"고 묻는 중이에요.',
+    '뒤돌아보지 마세요. 여기선 뒤돌아봐도 후회, 앞을 봐도 후회입니다.',
+    '(헉헉) 코너 돌기 전에 먼저 와 있었습니다. 관장은 어디에나 있습니다.',
+    '끝까지 걸으면 울음방이 나옵니다. 동선이 참 정직하죠.',
+  ],
+  unfin: [
+    '미완성 갤러리입니다. 이 복도도 원래 더 길 예정이었습니다.',
+    '천장이 낮은 건 예산이 중간에 끊겨서입니다. 컨셉이라고 해 두죠.',
+    '이젤의 그림요? 작가가 "내일 마저 그린다"고 했습니다. 3년 전에요.',
+    '여기 걸린 것들은 다 시작은 했습니다. 그게 어딥니까.',
+    '(헉헉) 먼저 와 있었습니다. 저도 이 복도 끝까지는 처음 와 봅니다.',
+  ],
+  lazy: [
+    '귀찮음의 방입니다. 조명은… 켜기 귀찮아서요.',
+    '침대에 눕지 마세요. 누우면 이 방의 전시품이 됩니다.',
+    '여기 작품들은 다 "내일 하지 뭐"에서 태어났습니다.',
+    '이불 밖은 위험합니다. 그래서 다들 여기 있죠.',
+    '(하품) 아, 먼저 와 있긴 했는데… 설명은 다음에 할게요.',
+  ],
+  dead: [
+    '마감의 방입니다. 모든 시계가 5분 빠릅니다. 그래도 늦습니다.',
+    '초침 소리 들리세요? 제 심장 소리입니다. 마감 전날엔 늘 이래요.',
+    '달력을 보세요. D-DAY가 어제입니다. 이 방은 늘 그렇습니다.',
+    '붉은 조명은 분위기가 아니라 경고등입니다.',
+    '(헉헉) 마감 5분 전에 겨우 도착했습니다. 관장도 예외는 없어요.',
+  ],
+  annex: [
+    '별관입니다. 실패가 너무 많아 급히 늘렸습니다. 이것도 계획에 없던 일이죠.',
+    '증축 공사는 끝나지 않습니다. 실패도 끝나지 않으니까요.',
+  ],
+});
 LINES.lobby = LINES.enter;
 // 상황에 맞는 멘트 풀 (빈 박물관 / 빈 전당 / 첫 고인)
 function linePool(kind) {
-  if (!exhibits.length && ['enter', 'lobby', 'hall', 'morgue', 'fame', 'lurk'].includes(kind)) return LINES.empty;
+  if (!exhibits.length && ['enter', 'lurk', ...Object.keys(ZONES)].includes(kind)) return LINES.empty;
   if (kind === 'fame' && !topFive().length) return LINES.fameEmpty;
   if (kind === 'registered' && exhibits.length === 1) return LINES.firstRegistered;
   return LINES[kind];
@@ -2268,7 +2738,7 @@ function linePool(kind) {
 // ================================================================
 const SKIN = mat(0xf1c9a5), HAIR = mat(0x2a2030);
 const NPC_TARGET ={ npc: true, id: '__npc', title: '관장' };
-const STATIONS = { lobby: [0, 6.55], hall: [-7.3, -1.3], morgue: [-11.2, 10.7], fame: [19.6, 3.4] };
+const STATIONS = { lobby: [0, 6.55], hall: [3.2, -8.2], regret: [-20.6, -8.2], morgue: [-11.2, 10.7], lazy: [-1.8, -30.2], dead: [7.3, -26.6], unfin: [20.5, -23.8], fame: [19.6, 3.4] };
 const npc = { g: null, head: null, torso: null, el: null, zone: 'lobby', speakUntil: 0, lastNear: 0, lastIdle: 0, nextLurk: Infinity, recent: [], yaw: 0 };
 const puffs = [];
 function buildDirector() {
@@ -2349,7 +2819,7 @@ function say(kind, { force = false } = {}) {
 }
 function director(kind, ex) {
   if (kind === 'enter') { npc.nextLurk = performance.now() + 75000; say('enter', { force: true }); }
-  else if (kind === 'registered') { placeDirector('morgue'); say('registered', { force: true }); }
+  else if (kind === 'registered') { const p = placement.get(ex.id); if (p && STATIONS[p.zone]) placeDirector(p.zone); say('registered', { force: true }); }
   else if (kind === 'empathy') say('empathy', { force: true });
 }
 function onZoneChange(zone) {
@@ -2406,6 +2876,69 @@ function setMuteIcon() { $('#btnMute').textContent = sfx.muted ? '🔇' : '🔊'
 // ================================================================
 //  HUD
 // ================================================================
+// ---------- 미니맵 (2D 캔버스): 구역 윤곽 · 문 · 내 위치와 방향 · 전당 표시 ----------
+let mmDirty = true;
+const mm = { el: $('#minimap'), big: false, collapsed: isTouch ? false : LS.get('fm_map_collapsed', false), last: 0, w: 0, h: 0 };
+function setMapCollapsed(v) {
+  mm.collapsed = v; LS.set('fm_map_collapsed', v);
+  if (v) setMapBig(false);
+  mm.el.hidden = v; $('#btnMap').hidden = !v;
+}
+function setMapBig(v) {
+  mm.big = v; mm.el.classList.toggle('big', v); mm.last = 0; syncBackBtn();
+}
+overlays.push({ isOpen: () => mm.big, close: () => setMapBig(false) });
+function drawMinimap(now) {
+  mm.last = now;
+  const el = mm.el;
+  if (el.hidden) return;
+  const dpr = Math.min(devicePixelRatio, 2), cw = el.clientWidth, ch = el.clientHeight;
+  if (mm.w !== cw || mm.h !== ch) { mm.w = cw; mm.h = ch; el.width = Math.round(cw * dpr); el.height = Math.round(ch * dpr); }
+  const g = el.getContext('2d'), W = el.width, H = el.height;
+  let x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity;
+  for (const Z of Object.values(ZONES)) for (const r of Z.rects) { x0 = Math.min(x0, r[0]); x1 = Math.max(x1, r[1]); z0 = Math.min(z0, r[2]); z1 = Math.max(z1, r[3]); }
+  const pad = 2, sc = Math.min(W / (x1 - x0 + pad * 2), H / (z1 - z0 + pad * 2));
+  const ox = (W - (x1 - x0) * sc) / 2 - x0 * sc, oz = (H - (z1 - z0) * sc) / 2 - z0 * sc;
+  const X = x => ox + x * sc, Y = z => oz + z * sc;
+  g.clearRect(0, 0, W, H);
+  for (const [k, Z] of Object.entries(ZONES)) {
+    g.fillStyle = k === currentZone ? 'rgba(232,194,90,.42)' : k === 'fame' ? 'rgba(179,36,47,.4)' : 'rgba(255,255,255,.13)';
+    for (const r of Z.rects) g.fillRect(X(r[0]), Y(r[2]), (r[1] - r[0]) * sc, (r[3] - r[2]) * sc);
+  }
+  g.strokeStyle = 'rgba(255,255,255,.55)'; g.lineWidth = Math.max(1, dpr);
+  for (const Z of Object.values(ZONES)) for (const r of Z.rects) g.strokeRect(X(r[0]), Y(r[2]), (r[1] - r[0]) * sc, (r[3] - r[2]) * sc);
+  // 문: 윤곽선 위에 틈을 낸다
+  g.strokeStyle = '#1a1830'; g.lineWidth = Math.max(2, 2.5 * dpr);
+  for (const d of DOORS) {
+    g.beginPath();
+    if (d.axis === 'x') { g.moveTo(X(d.x - d.w / 2), Y(d.z)); g.lineTo(X(d.x + d.w / 2), Y(d.z)); }
+    else { g.moveTo(X(d.x), Y(d.z - d.w / 2)); g.lineTo(X(d.x), Y(d.z + d.w / 2)); }
+    g.stroke();
+  }
+  const fr = ZONES.fame.rects[0];
+  g.fillStyle = '#f5d27a'; g.textAlign = 'center'; g.textBaseline = 'middle';
+  g.font = `700 ${Math.round((mm.big ? 15 : 10) * dpr)}px ${FONT_SANS}`;
+  g.fillText('★ 전당', X((fr[0] + fr[1]) / 2), Y((fr[2] + fr[3]) / 2));
+  if (mm.big) {
+    g.fillStyle = 'rgba(236,235,245,.85)'; g.font = `400 ${Math.round(12 * dpr)}px ${FONT_SANS}`;
+    for (const [k, Z] of Object.entries(ZONES)) {
+      if (k === 'fame') continue;
+      const r = Z.rects.reduce((a, b) => (b[1] - b[0]) * (b[3] - b[2]) > (a[1] - a[0]) * (a[3] - a[2]) ? b : a);
+      g.fillText(Z.name.split(' · ')[0], X((r[0] + r[1]) / 2), Y((r[2] + r[3]) / 2));
+    }
+  }
+  // 내 위치 + 방향 화살표
+  camera.getWorldDirection(_fwd);
+  const px = X(camera.position.x), pz = Y(camera.position.z), a = Math.atan2(_fwd.z, _fwd.x), R = (mm.big ? 11 : 7) * dpr;
+  g.fillStyle = '#ff5a4a'; g.strokeStyle = '#fff'; g.lineWidth = dpr;
+  g.beginPath(); g.moveTo(px + Math.cos(a) * R, pz + Math.sin(a) * R);
+  g.lineTo(px + Math.cos(a + 2.5) * R * .7, pz + Math.sin(a + 2.5) * R * .7);
+  g.lineTo(px + Math.cos(a - 2.5) * R * .7, pz + Math.sin(a - 2.5) * R * .7);
+  g.closePath(); g.fill(); g.stroke();
+}
+mm.el.addEventListener('click', () => setMapBig(!mm.big));
+$('#btnMap').addEventListener('click', () => setMapCollapsed(false));
+
 function defaultHint() {
   if (hovered === NPC_TARGET) return isTouch ? '관장을 탭하면 말을 겁니다' : '[E] 또는 클릭 — 관장에게 말 걸기';
   if (hovered) return isTouch ? `「${hovered.title}」 — 탭하거나 [자세히 보기]` : `[E] 또는 클릭 — 「${hovered.title}」 자세히 보기`;
@@ -2437,7 +2970,10 @@ function tick() {
     updateHover(now);
   }
   updateAmbient(dt, now);
+  updateZoneLights(dt, now);
   updateFrames(dt, now);
+  if (npc.g) npc.g.visible = visibleZones.has(npc.zone);
+  if (started && now - mm.last > 100) drawMinimap(now);
   updateDirector(dt, now);
   updatePuffs(dt);
   // 프레임이 부족하면 해상도를 조금씩 낮춘다 (모바일 30fps 목표)
@@ -2457,9 +2993,7 @@ function tick() {
 let visitorNo = 0, initialLoaded = false;
 async function boot() {
   await ensureFonts(document.querySelector('script[type=module]').textContent);
-  buildLobby();
-  buildMorgue();
-  buildStairsAndFame();
+  buildWorld();
   buildDirector();
   // 모드 표시: 로컬 모드면 항상 경고 배너
   $('#modeBanner').hidden = CONFIGURED;
@@ -2493,6 +3027,9 @@ window.FM = {
   get exhibits() { return exhibits; }, get status() { return Net.status; }, get net() { return Net; },
   get stats() { return { calls: renderer.info.render.calls, tris: renderer.info.render.triangles, textures: renderer.info.memory.textures, pixelRatio, fps: Math.round(fpsNow), frames: frames.size, loaded: [...frames.values()].filter(f => f.loaded).length, photos: [...frames.values()].filter(f => f.photo).length }; },
   open(id) { openDetail(exIndex.get(id)); }, empathize(id) { return doEmpathy(exIndex.get(id)); },
+  blocked: (x, z, r = player.radius) => blocked(x, z, r), zoneAt: (x, z) => zoneAt(x, z), floorAt: (x, z) => floorAt(x, z),
+  get zones() { return ZONES; }, get slots() { return SLOTS; }, get visibleZones() { return [...visibleZones]; }, get currentZone() { return currentZone; },
+  get lights() { return { zone: zonePool.active, total: (() => { let n = 0; scene.traverse(o => { if (o.isLight && o.intensity > 0.001 && o.visible) n++; }); return n; })() }; },
   get ui() { return { uiOpen, back: backTarget(), help: helpOpen(), toasts: $('#toasts').children.length, cam: camera.position.toArray().concat(camera.quaternion.toArray()) }; },
   async card(id, withPhoto = true) { return (await drawShareCard(exhibits.find(e => e.id === id), withPhoto)).toDataURL(); },
 };
@@ -2523,6 +3060,7 @@ $('#btnLook').addEventListener('click', interact);
 $('#btnMute').addEventListener('click', () => { sfx.init(); sfx.toggle(); setMuteIcon(); });
 $('#connDot').addEventListener('click', () => toast(STATUS_TEXT[Net.status] || ''));
 setMuteIcon();
+setMapCollapsed(mm.collapsed);
 $('#btnEmpathy').addEventListener('click', () => doEmpathy(selected));
 $('#btnShare').addEventListener('click', () => selected && saveShareCard(selected));
 $('#dPhoto').addEventListener('click', () => $('#dPhoto').src && openLightbox($('#dPhoto').src));
