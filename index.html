@@ -154,6 +154,11 @@
   #lightbox { position: fixed; inset: 0; z-index: 60; background: rgba(0,0,0,.92); display: grid; place-items: center; cursor: zoom-out; padding: 12px; }
   #lightbox[hidden] { display: none; }
   #lightbox img { max-width: 100%; max-height: 100%; object-fit: contain; }
+  /* 모바일 뒤로가기(닫기) 버튼: 닫을 UI가 있을 때만 */
+  #btnBack { position: fixed; z-index: 38; left: 12px; bottom: max(14px, env(safe-area-inset-bottom)); background: rgba(10, 9, 22, .9); color: var(--text); border: 1px solid var(--line); border-radius: 22px; height: 44px; padding: 0 18px; font-size: 15px; box-shadow: 0 4px 16px rgba(0,0,0,.5); }
+  #btnBack[hidden], body:not(.touch) #btnBack { display: none; }
+  body.touch .panel { padding-bottom: calc(max(20px, env(safe-area-inset-bottom)) + 60px); }
+  body.touch .modal { padding-bottom: 72px; }
 </style>
 <script type="importmap">
 { "imports": {
@@ -176,10 +181,14 @@
     <div class="keys">
       <span class="only-desk"><b>W A S D</b><span>걷기 (Shift: 서둘러 조문)</span></span>
       <span class="only-desk"><b>마우스</b><span>둘러보기 (클릭하면 시점 고정, Esc 해제)</span></span>
-      <span class="only-desk"><b>클릭 / E</b><span>액자 자세히 보기</span></span>
+      <span class="only-desk"><b>클릭</b><span>액자 자세히 보기</span></span>
+      <span class="only-desk"><b>E</b><span>상호작용/전시</span></span>
+      <span class="only-desk"><b>Q</b><span>열린 창 닫기 (Esc도 가능)</span></span>
+      <span class="only-desk"><b>M</b><span>미니맵</span></span>
       <span class="only-touch"><b>왼쪽 드래그</b><span>걷기</span></span>
       <span class="only-touch"><b>오른쪽 드래그</b><span>둘러보기</span></span>
-      <span class="only-touch"><b>액자 탭</b><span>자세히 보기</span></span>
+      <span class="only-touch"><b>액자 탭</b><span>자세히 보기 · 빈 액자 탭은 전시</span></span>
+      <span class="only-touch"><b>✕ 닫기</b><span>열린 창 닫기 (왼쪽 아래)</span></span>
       <b>우측 상단</b><span>연결 상태 점 · 내 실패 전시하기 · 음소거 · 도움말</span>
     </div>
     <button class="btn-solemn" id="btnEnter">조의를 표하고 입장하기</button>
@@ -254,6 +263,7 @@
 </div>
 
 <div id="lightbox" hidden><img alt="크게 보기"></div>
+<button id="btnBack" hidden>✕ 닫기</button>
 
 <script type="module">
 import * as THREE from 'three';
@@ -1269,29 +1279,40 @@ function addLook(dYaw, dPitch) {
   setLook(look.y + dYaw, look.x + dPitch);
 }
 
+// Q / Esc = 뒤로가기(열린 UI를 한 단계만 닫음). 위치·시야는 절대 건드리지 않는다.
+//  입력창에 포커스가 있으면 Q는 글자 입력, Esc만 뒤로가기.
+//  시점 고정(PointerLock) 중의 Esc는 브라우저가 고정 해제에 쓰므로 그 한 번은 뒤로가기로 치지 않는다.
+let unlockedAt = -1e9;
 addEventListener('keydown', e => {
-  if (e.target.closest && e.target.closest('input, textarea, select')) {
-    if (e.code === 'Escape') closeUI();
+  const inField = e.target.closest && e.target.closest('input, textarea, select');
+  if (e.code === 'Escape') {
+    if (controls.isLocked || performance.now() - unlockedAt < 250) return;
+    if (started || !$('#lightbox').hidden) goBack();
     return;
   }
-  if (e.code === 'Escape') { closeUI(); return; }
-  if (e.code === 'KeyE' && started) interact();
+  if (inField) return;
+  if (e.code === 'KeyQ') { if (started && !e.repeat) goBack({ relock: true }); return; }
+  if (e.code === 'KeyE' && started && !e.repeat) interact();
   keys.add(e.code);
 });
 addEventListener('keyup', e => keys.delete(e.code));
 addEventListener('blur', () => keys.clear());
 
-function lockPointer() {
-  if (isTouch || lockFailed || controls.isLocked || uiOpen) return;
+let softLock = false;
+function lockPointer(soft = false) {
+  if (isTouch || lockFailed || controls.isLocked || uiOpen || !started) return;
+  softLock = soft;
+  const fail = () => { if (!softLock) { lockFailed = true; setHint(defaultHint()); } };
   try {
     const r = document.body.requestPointerLock();
-    if (r && r.catch) r.catch(() => { lockFailed = true; setHint(defaultHint()); });
-  } catch { lockFailed = true; }
+    if (r && r.catch) r.catch(fail);
+  } catch { fail(); }
 }
-function unlockPointer() { if (controls.isLocked) controls.unlock(); }
-document.addEventListener('pointerlockerror', () => { lockFailed = true; setHint(defaultHint()); });
-controls.addEventListener('lock', () => setHint(defaultHint()));
-controls.addEventListener('unlock', () => setHint(defaultHint()));
+function unlockPointer() { if (controls.isLocked) { lockBeforeUI = true; controls.unlock(); } }
+let lockBeforeUI = false;   // UI를 열기 직전에 시점 고정 상태였는지 (Q로 닫으면 다시 고정)
+document.addEventListener('pointerlockerror', () => { if (!softLock) { lockFailed = true; setHint(defaultHint()); } });
+controls.addEventListener('lock', () => { lockBeforeUI = false; setHint(defaultHint()); });
+controls.addEventListener('unlock', () => { unlockedAt = performance.now(); setHint(defaultHint()); });
 // 시점 고정 상태의 클릭 = 조준한 전시품 보기
 document.addEventListener('mousedown', e => { if (controls.isLocked && e.button === 0) interact(); });
 
@@ -1655,6 +1676,7 @@ function openDetail(ex) {
   refreshDetail();
   $('#detail').hidden = false;
   $('#btnLook').hidden = true;
+  syncBackBtn();
 }
 function refreshDetail() {
   const ex = selected;
@@ -1681,10 +1703,52 @@ function closeUI() {
   document.body.classList.remove('panel-open');
   lastRay = 0; hovered = undefined;
   setHint(defaultHint());
+  syncBackBtn();
+}
+
+// ---------- 뒤로가기: 위에서부터 하나만 닫고 끝 ----------
+//  (사진 크게 보기) → 상세 패널 → 등록 모달(작성 중이면 확인) → 전시 위치 선택 → 도움말·설정·확대 미니맵 → 없으면 아무 일도 안 함
+const helpOpen = () => started && !$('#intro').hidden;
+const overlays = [];   // { isOpen(), close() } — 기타 오버레이(도움말, 설정, 확대 미니맵 …)
+overlays.push({ isOpen: helpOpen, close: () => { $('#intro').hidden = true; } });
+function backTarget() {
+  if (!$('#lightbox').hidden) return 'lightbox';
+  if (uiOpen === 'detail') return 'detail';
+  if (uiOpen === 'register') return 'register';
+  if (overlays.some(o => o.isOpen())) return 'overlay';
+  return null;
+}
+function goBack({ relock = false } = {}) {
+  const t = backTarget();
+  if (!t) return false;
+  if (t === 'lightbox') $('#lightbox').hidden = true;
+  else if (t === 'detail') closeUI();
+  else if (t === 'register') { if (!closeRegister()) return false; }
+  else overlays.find(o => o.isOpen()).close();
+  syncBackBtn();
+  // Q(사용자 입력)로 마지막 창을 닫았고, 창을 열기 전에 시점 고정 상태였다면 다시 고정 (시야 각도는 그대로)
+  if (relock && lockBeforeUI && !backTarget()) lockPointer(true);
+  return true;
+}
+function syncBackBtn() { $('#btnBack').hidden = !(started && backTarget()); }
+// 등록 모달 닫기: 입력한 내용이 있으면 확인 후 비움
+function registerDirty() {
+  const f = $('#regForm');
+  return ['title', 'causeOther', 'age', 'relic', 'epitaph'].some(k => f[k].value.trim()) || f.cause.selectedIndex !== 0 || !!pendingPhoto;
+}
+function closeRegister() {
+  if (registerDirty() && !confirm('작성 중인 내용이 사라집니다. 닫을까요?')) return false;
+  resetRegisterForm();
+  closeUI();
+  return true;
+}
+function resetRegisterForm() {
+  $('#regForm').reset(); clearPhoto(true); syncCauseField(); updateCounts(); $('#regErr').textContent = '';
 }
 function openLightbox(src) {
   $('#lightbox img').src = src;
   $('#lightbox').hidden = false;
+  syncBackBtn();
 }
 
 // ================================================================
@@ -1807,6 +1871,7 @@ function openRegister() {
   uiOpen = 'register';
   $('#regErr').textContent = '';
   $('#register').hidden = false;
+  syncBackBtn();
   if (!isTouch) setTimeout(() => $('#regForm [name=title]').focus(), 50);
 }
 function formValues(form) {
@@ -2428,6 +2493,7 @@ window.FM = {
   get exhibits() { return exhibits; }, get status() { return Net.status; }, get net() { return Net; },
   get stats() { return { calls: renderer.info.render.calls, tris: renderer.info.render.triangles, textures: renderer.info.memory.textures, pixelRatio, fps: Math.round(fpsNow), frames: frames.size, loaded: [...frames.values()].filter(f => f.loaded).length, photos: [...frames.values()].filter(f => f.photo).length }; },
   open(id) { openDetail(exIndex.get(id)); }, empathize(id) { return doEmpathy(exIndex.get(id)); },
+  get ui() { return { uiOpen, back: backTarget(), help: helpOpen(), toasts: $('#toasts').children.length, cam: camera.position.toArray().concat(camera.quaternion.toArray()) }; },
   async card(id, withPhoto = true) { return (await drawShareCard(exhibits.find(e => e.id === id), withPhoto)).toDataURL(); },
 };
 
@@ -2436,7 +2502,9 @@ $('#btnEnter').addEventListener('click', () => {
   $('#intro').hidden = true;
   $('#hud').hidden = false;
   started = true;
+  $('#btnEnter').textContent = '관람 계속하기';
   setHint(defaultHint());
+  syncBackBtn();
   lockPointer();
   sfx.init();
   if (firstEntry) { firstEntry = false; onFirstEnter(); }
@@ -2445,7 +2513,11 @@ function onFirstEnter() {
   if (visitorNo) toast(`당신은 <b>${visitorNo.toLocaleString('ko-KR')}</b>번째 방문객입니다. 삼가 조의를 표합니다.`, 5000);
   director('enter');
 }
-$('#btnHelp').addEventListener('click', () => { unlockPointer(); closeUI(); $('#intro').hidden = false; });
+$('#btnHelp').addEventListener('click', () => {
+  if (uiOpen === 'register' && !closeRegister()) return;
+  unlockPointer(); closeUI(); $('#intro').hidden = false; syncBackBtn();
+});
+$('#btnBack').addEventListener('click', () => goBack());
 $('#btnRegister').addEventListener('click', openRegister);
 $('#btnLook').addEventListener('click', interact);
 $('#btnMute').addEventListener('click', () => { sfx.init(); sfx.toggle(); setMuteIcon(); });
@@ -2454,9 +2526,10 @@ setMuteIcon();
 $('#btnEmpathy').addEventListener('click', () => doEmpathy(selected));
 $('#btnShare').addEventListener('click', () => selected && saveShareCard(selected));
 $('#dPhoto').addEventListener('click', () => $('#dPhoto').src && openLightbox($('#dPhoto').src));
-$('#lightbox').addEventListener('click', () => { $('#lightbox').hidden = true; });
-for (const b of document.querySelectorAll('[data-close]')) b.addEventListener('click', closeUI);
-$('#register').addEventListener('click', e => { if (e.target.id === 'register') closeUI(); });
+$('#lightbox').addEventListener('click', () => { $('#lightbox').hidden = true; syncBackBtn(); });
+$('#detail [data-close]').addEventListener('click', closeUI);
+for (const b of document.querySelectorAll('#register [data-close]')) b.addEventListener('click', closeRegister);
+$('#register').addEventListener('click', e => { if (e.target.id === 'register') closeRegister(); });
 $('#regForm').addEventListener('submit', submitRegister);
 $('#regForm [name=cause]').addEventListener('change', syncCauseField);
 $('#regForm').addEventListener('input', updateCounts);
