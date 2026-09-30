@@ -111,7 +111,7 @@
     #topbar button { padding: 0 10px; }
     #btnLook { bottom: 150px; }
     #joyHint { bottom: 150px; }
-    #subtitle { bottom: calc(max(16px, env(safe-area-inset-bottom)) + 44px); font-size: 14px; }
+    #subtitle { bottom: calc(max(16px, env(safe-area-inset-bottom)) + 76px); font-size: 14px; }
     .panel { left: 0; right: 0; bottom: 0; top: auto; width: 100%; max-height: 64%; padding-bottom: max(20px, env(safe-area-inset-bottom)); }
   }
   /* 토스트 / 자막 / 이모지 */
@@ -157,6 +157,11 @@
   #lightbox { position: fixed; inset: 0; z-index: 60; background: rgba(0,0,0,.92); display: grid; place-items: center; cursor: zoom-out; padding: 12px; }
   #lightbox[hidden] { display: none; }
   #lightbox img { max-width: 100%; max-height: 100%; object-fit: contain; }
+  /* 설정 (밝기) */
+  #settings { position: absolute; z-index: 21; right: 12px; top: calc(max(12px, env(safe-area-inset-top)) + 50px); width: 240px; background: var(--panel); border: 1px solid var(--line); padding: 12px 14px; font-size: 14px; border-radius: 4px; }
+  #settings[hidden] { display: none; }
+  #settings input { width: 100%; margin: 8px 0 4px; accent-color: var(--gold); }
+  #settings p { margin: 0; font-size: 12px; color: var(--dim); }
   /* 미니맵 */
   #minimap { position: absolute; right: 12px; top: calc(max(12px, env(safe-area-inset-top)) + 50px); width: 172px; height: 150px; background: rgba(10, 9, 22, .72); border: 1px solid var(--line); border-radius: 4px; cursor: zoom-in; }
   #minimap.big { position: fixed; z-index: 36; left: 50%; top: 50%; right: auto; width: min(92vw, 760px); height: min(80vh, 640px); transform: translate(-50%, -50%); cursor: zoom-out; background: rgba(10, 9, 22, .94); }
@@ -212,7 +217,13 @@
     <button id="connDot" class="offline" title="연결 상태" aria-label="연결 상태"></button>
     <button id="btnRegister">내 실패 전시하기</button>
     <button id="btnMute" aria-label="음소거">🔊</button>
+    <button id="btnSettings" title="설정" aria-label="설정">⚙</button>
     <button id="btnHelp" title="도움말" aria-label="도움말">?</button>
+  </div>
+  <div id="settings" hidden>
+    <label for="bright">밝기 <b id="brightVal"></b></label>
+    <input type="range" id="bright" min="0.6" max="1.8" step="0.05">
+    <p>어두우면 올리세요. 너무 낮춰도 길은 보이게 최소 밝기는 유지됩니다.</p>
   </div>
   <canvas id="minimap" title="미니맵 (누르면 크게 · M 접기)"></canvas>
   <button id="btnMap" hidden>🗺 지도 (M)</button>
@@ -494,12 +505,12 @@ const M = {
   flame: new THREE.MeshBasicMaterial({ color: 0xffc35a }),
   guide: new THREE.MeshBasicMaterial({ color: 0xc9a23a }),
   hit: new THREE.MeshBasicMaterial({ visible: false }),
-  beam: new THREE.MeshBasicMaterial({ color: 0xffe3a0, transparent: true, opacity: 0.09, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide }),
+  beam: new THREE.MeshBasicMaterial({ color: 0xffcf6a, transparent: true, opacity: 0.09, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide }),
   trophy: new THREE.MeshStandardMaterial({ color: 0xd9a63a, metalness: .55, roughness: .3, emissive: 0x2a1800, side: THREE.DoubleSide }),
 };
 const std = (color, roughness, metalness = 0) => new THREE.MeshStandardMaterial({ color, roughness, metalness });
 const FLOOR = {
-  marble: std(0x9f9ca8, .34, .1),      // 중앙홀: 밝은 회색 + 약한 반사
+  marble: std(0x9a97a3, .5, .08),      // 중앙홀: 밝은 회색 + 약한 반사
   lobby: std(0x6d6982, .28, .1),
   wood: std(0x6e4a2e, .62),            // 복도: 나무
   woodDark: std(0x523522, .7),
@@ -1102,7 +1113,7 @@ function buildStairsAndFame() {
   for (const z of [5.4, 8.6]) addCollider(staticColliders, 23, z, 6, .15);
   crookedFrame(f, '명예의 전당 입성 조건', '공감 많이 받기 (그게 다임)', 17.2, FAME_Y + 2.4, 13, Math.PI / 2, 1.4, 1);
   crookedFrame(f, '여기까지 온 당신도', '사실 대단한 겁니다', 17.2, FAME_Y + 2.4, 1, Math.PI / 2, 1.4, 1);
-  fameSpot = new THREE.SpotLight(0xffd27a, 70, 18, .75, .5, 1); fameSpot.position.set(28.5, FAME_Y + 6.8, 7); fameSpot.target.position.set(32.8, FAME_Y + 2.5, 7);
+  fameSpot = new THREE.SpotLight(0xffc24a, 120, 20, .78, .45, 1);   // 전당: 기존 스포트라이트를 더 강한 금빛으로 fameSpot.position.set(28.5, FAME_Y + 6.8, 7); fameSpot.target.position.set(32.8, FAME_Y + 2.5, 7);
   const warm = new THREE.PointLight(0xff9a7a, 12, 18, 1); warm.position.set(21, FAME_Y + 5, 7);
   fameSpot.castShadow = true; fameSpot.shadow.mapSize.set(1024, 1024);
   f.add(fameSpot, fameSpot.target, warm);
@@ -1639,13 +1650,13 @@ function updateFrames(dt, now) {
   hoverHL.material.opacity = .55 + Math.sin(now * .006) * .35;
   placeHL.material.opacity = .6 + Math.sin(now * .01) * .4;
   for (const f of frames.values()) {
-    f.group.visible = visibleZones.has(f.zone);
+    f.group.visible = visibleZones.has(f.zone) && f.group.position.distanceToSquared(camera.position) < 900;   // 30m 넘으면 안개 속이라 생략
     if (f.anim) {   // 살짝 떨어지며 걸리는 애니메이션
       const a = f.anim; a.t += dt;
       const k = Math.min(1, a.t / a.dur);
       f.inner.position.y = a.h * (1 - easeOutBounce(k));
       f.inner.rotation.z = f.tilt + a.swing * Math.exp(-4 * k) * Math.cos(k * 14);
-      if (!a.landed && k > .36) { a.landed = true; sfx.thud(f.group.position); }
+      if (!a.landed && k > .36) { a.landed = true; sfx.thud(f.group.position); setTimeout(() => lampOn(f), 250); }
       if (k >= 1) { f.inner.position.y = 0; f.inner.rotation.z = f.tilt; f.anim = null; }
     }
     if (f.move) {
@@ -1710,6 +1721,7 @@ function layoutAll({ animate = new Set(), initial = false } = {}) {
   for (const [id, e] of occupiedSlots) { const sl = SLOT.get(id); want.set(e.id, { style: 'normal', rank: -1, zone: sl.zone, slot: sl }); }
   applyLayout(want, { animate, initial });
   updateEmptySlots();
+  syncLamps(initial);
   if (placing && !slotFree(placing)) onPlacingTaken();
 }
 // 전당 = 공감 1 이상 상위 5. 공용 DB(v3)에서는 DB가 계산한 in_hall을 그대로 따른다 (increment_empathy 안에서 재계산).
@@ -1794,7 +1806,7 @@ function updateConfetti(dt, t) {
 function confettiBurst() { cf.forEach(p => { p.y = rand(FAME_Y + 4, FAME_Y + 7); p.boost = rand(0, 1.5); }); }
 
 // 조명
-const hemi = new THREE.HemisphereLight(0xb8b4ff, 0x2a2140, 1.6);
+const hemi = new THREE.HemisphereLight(0xb8b4ff, 0x2a2140, .8);
 scene.add(hemi);
 
 // ================================================================
@@ -1835,6 +1847,117 @@ const ZONE_LIGHTS = [
   ['annex', -26, 3.5, -20.5, 0xffd9a8, 7, 10],
 ].map(([zone, x, y, z, color, i, d]) => ({ zone, x, y, z, color, i, d }));
 const zonePool = new LightPool(() => new THREE.PointLight(0xffffff, 0, 10, 1), isTouch ? 3 : 4);
+
+// ================================================================
+//  액자등: 모든 슬롯에 브래스 액자등(가는 바 + 소형 갓) 메시를 InstancedMesh로 달고,
+//   빛은 (1) 액자 앞 가산 블렌딩 그라디언트 평면 + 벽 위쪽의 원뿔형 광 표시(투명 메시)로 흉내 내고
+//   (2) 실제 SpotLight는 플레이어와 가까운 액자 최대 6개에만 풀링해서 할당한다 (거리순 재할당, intensity lerp).
+//  빈 액자는 등이 꺼져 있고, 작품이 걸리면 "딸깍" 하고 켜진다. 일부 등은 가끔 깜빡이고, 철거 임박 작품은 자주 깜빡인다.
+// ================================================================
+const LAMP_Y = FRAME.h / 2 + .2;
+const lampHood = new THREE.InstancedMesh(mergeGeometries([
+  new THREE.BoxGeometry(.03, .03, .26).translate(0, LAMP_Y, .13),
+  new THREE.BoxGeometry(.64, .05, .1).translate(0, LAMP_Y - .01, .28),
+  new THREE.CylinderGeometry(.018, .018, .7, 8).rotateZ(Math.PI / 2).translate(0, LAMP_Y + .025, .28),
+]), new THREE.MeshLambertMaterial({ color: 0xb08d4a, emissive: 0x2a1c08 }), SLOT_CAP);
+const lampBulb = new THREE.InstancedMesh(new THREE.BoxGeometry(.56, .012, .05).translate(0, LAMP_Y - .042, .28), new THREE.MeshBasicMaterial(), SLOT_CAP);
+const glowMat = map => new THREE.MeshBasicMaterial({ map, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending });
+// 액자 앞면: 위가 밝고 아래로 부드럽게 빠지는 빛 번짐
+const frameGlowTex = canvasTexture(128, 128, (c, W, H) => {
+  const v = c.createLinearGradient(0, 0, 0, H); v.addColorStop(0, 'rgba(255,255,255,.95)'); v.addColorStop(.45, 'rgba(255,255,255,.4)'); v.addColorStop(1, 'rgba(255,255,255,.05)');
+  c.fillStyle = v; c.fillRect(0, 0, W, H);
+  c.globalCompositeOperation = 'destination-in';
+  const h = c.createLinearGradient(0, 0, W, 0); h.addColorStop(0, 'rgba(0,0,0,0)'); h.addColorStop(.2, 'rgba(0,0,0,1)'); h.addColorStop(.8, 'rgba(0,0,0,1)'); h.addColorStop(1, 'rgba(0,0,0,0)');
+  c.fillStyle = h; c.fillRect(0, 0, W, H);
+});
+// 벽면: 등에서 아래로 퍼지는 원뿔형 빛
+const coneTex = canvasTexture(128, 160, (c, W, H) => {
+  for (let i = 0; i < 14; i++) {
+    const k = i / 14, top = W * (.16 - k * .06), bot = W * (.5 - k * .1);
+    c.fillStyle = 'rgba(255,255,255,.07)';
+    c.beginPath(); c.moveTo(W / 2 - top, 0); c.lineTo(W / 2 + top, 0); c.lineTo(W / 2 + bot, H); c.lineTo(W / 2 - bot, H); c.closePath(); c.fill();
+  }
+  c.globalCompositeOperation = 'destination-in';
+  const v = c.createLinearGradient(0, 0, 0, H); v.addColorStop(0, 'rgba(0,0,0,1)'); v.addColorStop(.6, 'rgba(0,0,0,.45)'); v.addColorStop(1, 'rgba(0,0,0,0)');
+  c.fillStyle = v; c.fillRect(0, 0, W, H);
+});
+const lampGlow = new THREE.InstancedMesh(new THREE.PlaneGeometry(FRAME.w + .14, FRAME.h + .12).translate(0, .02, .095), glowMat(frameGlowTex), SLOT_CAP);
+const lampCone = new THREE.InstancedMesh(new THREE.PlaneGeometry(2, 2.3).translate(0, LAMP_Y - 1.15, -.004), glowMat(coneTex), SLOT_CAP);
+const LAMP_MESHES = [lampHood, lampBulb, lampGlow, lampCone];
+const BLACK = new THREE.Color(0), WARM = new THREE.Color(0xffd9a0), BULB_OFF = new THREE.Color(0x2a241c), _lc = new THREE.Color();
+for (const im of LAMP_MESHES) {
+  im.frustumCulled = false; im.count = 0;
+  if (im !== lampHood) for (let i = 0; i < SLOT_CAP; i++) im.setColorAt(i, BLACK);
+  scene.add(im);
+}
+lampCone.renderOrder = 1; lampGlow.renderOrder = 2;
+const lamps = new Map();   // 슬롯 id → { level, want, dying, flickery, nextFlick, flickUntil }
+function lampState(id) {
+  if (!lamps.has(id)) lamps.set(id, { level: 0, want: 0, dying: false, flickery: hashId(id + 'lamp') % 100 < 14, nextFlick: performance.now() + rand(3000, 20000), flickUntil: 0 });
+  return lamps.get(id);
+}
+const _lm = new THREE.Matrix4(), _le = new THREE.Euler();
+function syncLamps(initial = false) {
+  slotList.forEach((sl, i) => {
+    _le.set(0, sl.rotY, 0);
+    _lm.compose(_sp.set(sl.x, sl.y, sl.z), _sq.setFromEuler(_le), _ss.setScalar(sl.s || 1));
+    for (const im of LAMP_MESHES) im.setMatrixAt(i, _lm);
+    const st = lampState(sl.id), e = occupiedSlots.get(sl.id), f = e && frames.get(e.id);
+    st.want = e && !(f && f.anim && !f.anim.landed) ? 1 : 0;   // 떨어지는 중이면 걸린 뒤에 켠다
+    st.dying = !!e && daysLeft(e) <= 3;
+    if (initial) st.level = st.want;
+  });
+  for (const im of LAMP_MESHES) { im.count = slotList.length; im.instanceMatrix.needsUpdate = true; }
+}
+function lampOn(f) {
+  const st = f.slot && lamps.get(f.slot.id);
+  if (!st || f.zone === 'fame' || st.want) return;
+  st.want = 1;
+  sfx.click(f.group.position);
+}
+function lampValue(st, now) {
+  if (!st.want || st.level <= 0) return st.level;
+  const interval = st.dying ? [1200, 4000] : st.flickery ? [7000, 22000] : null;
+  if (interval && now > st.nextFlick) { st.flickUntil = now + rand(180, st.dying ? 900 : 500); st.nextFlick = now + rand(...interval); }
+  return now < st.flickUntil ? st.level * (Math.sin(now * .07 + st.nextFlick) > .1 ? 1 : .15) : st.level;
+}
+const framePool = new LightPool(() => { const l = new THREE.SpotLight(0xffd9a0, 0, 5, .62, .85, 1); return l; }, isTouch ? 4 : 6);
+let lastLampAssign = 0;
+function updateLamps(dt, now) {
+  const vals = new Map();
+  slotList.forEach((sl, i) => {
+    const st = lampState(sl.id);
+    st.level = st.want ? Math.min(1, st.level + dt * 5) : Math.max(0, st.level - dt * 3);
+    const v = lampValue(st, now);
+    vals.set(sl.id, v);
+    lampBulb.setColorAt(i, _lc.copy(BULB_OFF).lerp(WARM, v));
+    lampGlow.setColorAt(i, _lc.copy(WARM).multiplyScalar(v * .36));
+    lampCone.setColorAt(i, _lc.copy(WARM).multiplyScalar(v * .32));
+  });
+  for (const im of [lampBulb, lampGlow, lampCone]) im.instanceColor.needsUpdate = true;
+  if (now - lastLampAssign > 300) {
+    lastLampAssign = now;
+    const cx = camera.position.x, cz = camera.position.z;
+    framePool.assign(slotList.filter(sl => lamps.get(sl.id).want && visibleZones.has(sl.zone) && Math.abs(floorAt(sl.x, sl.z) - camera.position.y + player.eye) < 3)
+      .map(sl => ({ sl, d: Math.hypot(sl.x - cx, sl.z - cz) })).filter(o => o.d < 14)
+      .sort((a, b) => a.d - b.d).slice(0, framePool.items.length).map(o => o.sl));
+  }
+  framePool.update(dt, (l, sl) => {
+    const n = Math.sin(sl.rotY), c = Math.cos(sl.rotY), s = sl.s || 1;
+    l.position.set(sl.x + n * .3 * s, sl.y + (LAMP_Y - .05) * s, sl.z + c * .3 * s);
+    l.target.position.set(sl.x + n * .05, sl.y - .15, sl.z + c * .05);
+    l.target.updateMatrixWorld();
+  }, sl => 9 * (vals.get(sl.id) ?? 0));
+}
+
+// ---------- 분위기 조명: 구역별 반구광(어둡게) + 밝기 설정 (최소 밝기 보장) ----------
+const ZONE_AMBIENT = { lobby: .8, hall: .72, regret: .5, morgue: .55, lazy: .38, dead: .45, unfin: .5, stairs: .7, fame: .75, annex: .5 };
+const BRIGHT = { min: .6, max: 1.8 };
+let brightness = 1;   // 설정 UI를 만들 때 localStorage 값으로 채움
+function updateAmbientLight(dt) {
+  const want = Math.max(.3, (ZONE_AMBIENT[currentZone] ?? .6) * brightness);
+  hemi.intensity += (want - hemi.intensity) * Math.min(1, dt * 2);
+}
 let lastZoneAssign = 0;
 function updateZoneLights(dt, now) {
   if (now - lastZoneAssign > 400) {
@@ -1845,7 +1968,7 @@ function updateZoneLights(dt, now) {
       .sort((p, q) => p.k - q.k).slice(0, zonePool.items.length).map(p => p.a);
     zonePool.assign(cand);
   }
-  zonePool.update(dt, (l, a) => { l.position.set(a.x, a.y, a.z); l.color.setHex(a.color); l.distance = a.d; }, a => a.i);
+  zonePool.update(dt, (l, a) => { l.position.set(a.x, a.y, a.z); l.color.setHex(a.color); l.distance = a.d; }, a => a.i * (.55 + .45 * brightness));
 }
 
 // ================================================================
@@ -1872,7 +1995,7 @@ function addLook(dYaw, dPitch) {
 //  시점 고정(PointerLock) 중의 Esc는 브라우저가 고정 해제에 쓰므로 그 한 번은 뒤로가기로 치지 않는다.
 let unlockedAt = -1e9;
 addEventListener('keydown', e => {
-  const inField = e.target.closest && e.target.closest('input, textarea, select');
+  const inField = e.target.closest && e.target.closest('input:not([type=range]), textarea, select');
   if (e.code === 'Escape') {
     if (controls.isLocked || performance.now() - unlockedAt < 250) return;
     if (started || !$('#lightbox').hidden) goBack();
@@ -2854,6 +2977,14 @@ const sfx = (() => {
       const k = clamp(1 - Math.hypot(pos.x - player.x, pos.z - player.z) / 12, 0, 1);
       if (k > 0) note({ type: 'sawtooth', f: 100, f2: 90, dur: .08, vol: .05 * k + .0002, lp: 600 });
     },
+    // 액자등 켜지는 소리: 딸깍
+    click(pos) {
+      if (!ok()) return;
+      const k = pos ? clamp(1 - Math.hypot(pos.x - player.x, pos.z - player.z) / 14, 0, 1) : 1;
+      if (k <= 0) return;
+      note({ type: 'square', f: 2600, f2: 1900, dur: .03, vol: .06 * k + .0002, lp: 5000 });
+      note({ type: 'triangle', f: 900, f2: 500, t: .045, dur: .04, vol: .08 * k + .0002 });
+    },
     // 액자가 벽에 걸리는 소리: 툭
     thud(pos) {
       if (!ok()) return;
@@ -3219,6 +3350,15 @@ function drawMinimap(now) {
   g.closePath(); g.fill(); g.stroke();
 }
 mm.el.addEventListener('click', () => setMapBig(!mm.big));
+// 설정: 밝기
+function setBrightness(v) {
+  brightness = clamp(+v || 1, BRIGHT.min, BRIGHT.max); LS.set('fm_brightness', brightness);
+  $('#bright').value = brightness; $('#brightVal').textContent = Math.round(brightness * 100) + '%';
+}
+overlays.push({ isOpen: () => !$('#settings').hidden, close: () => { $('#settings').hidden = true; } });
+$('#btnSettings').addEventListener('click', () => { $('#settings').hidden = !$('#settings').hidden; if (!$('#settings').hidden) unlockPointer(); syncBackBtn(); });
+$('#bright').addEventListener('input', e => setBrightness(e.target.value));
+setBrightness(LS.get('fm_brightness', 1));
 $('#btnMap').addEventListener('click', () => setMapCollapsed(false));
 
 function defaultHint() {
@@ -3255,6 +3395,8 @@ function tick() {
   }
   updateAmbient(dt, now);
   updateZoneLights(dt, now);
+  updateLamps(dt, now);
+  updateAmbientLight(dt);
   updateFrames(dt, now);
   if (npc.g) npc.g.visible = visibleZones.has(npc.zone);
   if (started && now - mm.last > 100) drawMinimap(now);
@@ -3314,7 +3456,8 @@ window.FM = {
   open(id) { openDetail(exIndex.get(id)); }, empathize(id) { return doEmpathy(exIndex.get(id)); },
   blocked: (x, z, r = player.radius) => blocked(x, z, r), zoneAt: (x, z) => zoneAt(x, z), floorAt: (x, z) => floorAt(x, z),
   get zones() { return ZONES; }, get slots() { return SLOTS; }, get visibleZones() { return [...visibleZones]; }, get currentZone() { return currentZone; },
-  get lights() { return { zone: zonePool.active, total: (() => { let n = 0; scene.traverse(o => { if (o.isLight && o.intensity > 0.001 && o.visible) n++; }); return n; })() }; },
+  get lights() { return { frame: framePool.active, zone: zonePool.active, total: (() => { let n = 0; scene.traverse(o => { if (o.isLight && o.intensity > 0.001 && o.visible) n++; }); return n; })() }; },
+  lamp(id) { const st = lamps.get(id); return st ? { level: st.level, want: st.want, dying: st.dying } : null; },
   get slotState() { return { total: slotList.length, occupied: occupiedSlots.size, free: slotList.length - occupiedSlots.size, placing, v3: Remote.v3, annexLen, byExhibit: Object.fromEntries([...occupiedSlots].map(([sid, e]) => [e.id, sid])) }; },
   aimSlot(id) { const sl = SLOT.get(id), v = viewPointOf(sl); player.x = v.pos.x; player.z = v.pos.z; camera.position.copy(v.pos); camera.lookAt(v.look); look.setFromQuaternion(camera.quaternion); lastRay = 0; },
   get hovered() { return hovered ? { id: hovered.id, slot: !!hovered.slotTarget } : null; },
