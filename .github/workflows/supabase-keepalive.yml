@@ -1,0 +1,45 @@
+# Supabase 무료 플랜은 1주일 넘게 요청이 없으면 프로젝트를 일시정지합니다.
+# 3일마다 아주 작은 조회를 보내 깨워 두고, 응답이 없으면 실패로 표시해(메일 알림) 장애를 먼저 알 수 있게 합니다.
+# URL과 publishable/anon 키는 이미 공개된 index.html 의 CONFIG 에서 읽으므로 비밀값이 필요 없습니다.
+name: Supabase keep-alive
+
+on:
+  schedule:
+    - cron: '17 3 */3 * *'   # 3일마다 03:17 UTC
+  workflow_dispatch:          # Actions 탭에서 수동 실행 가능
+
+permissions:
+  contents: read
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: index.html
+          sparse-checkout-cone-mode: false
+      - name: CONFIG 읽기
+        id: cfg
+        run: |
+          line=$(grep -m1 'const CONFIG = {' index.html)
+          url=$(printf '%s' "$line" | sed -E 's/.*SUPABASE_URL: "([^"]*)".*/\1/' | sed -E 's#/+$##; s#/(rest|storage|realtime|auth)/v1$##')
+          key=$(printf '%s' "$line" | sed -E 's/.*SUPABASE_ANON_KEY: "([^"]*)".*/\1/')
+          if [ -z "$url" ] || [ -z "$key" ]; then echo "CONFIG 가 비어 있어 건너뜁니다 (로컬 모드)"; echo "skip=1" >> "$GITHUB_OUTPUT"; exit 0; fi
+          echo "::add-mask::$key"
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+          echo "key=$key" >> "$GITHUB_OUTPUT"
+      - name: Supabase 조회 (깨우기 + 상태 확인)
+        if: steps.cfg.outputs.skip != '1'
+        env:
+          URL: ${{ steps.cfg.outputs.url }}
+          KEY: ${{ steps.cfg.outputs.key }}
+        run: |
+          code=$(curl -s -o /tmp/body.txt -w '%{http_code}' --max-time 30 "$URL/rest/v1/exhibits?select=id&limit=1" -H "apikey: $KEY")
+          echo "HTTP $code"
+          if [ "$code" != "200" ]; then
+            echo "::error::Supabase 응답 없음(HTTP $code). 프로젝트가 일시정지됐는지 대시보드에서 확인하고 Restore 하세요."
+            head -c 300 /tmp/body.txt || true
+            exit 1
+          fi
