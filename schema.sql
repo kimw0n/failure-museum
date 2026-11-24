@@ -275,10 +275,145 @@ create policy exhibit_photos_upload on storage.objects
     and name ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.jpg$'
   );
 
+-- ============================================================
+--  v4: 서버 측 남용 제한 (자세한 설명은 migration_v4.sql 머리말)
+--  아래 함수들이 위 v3 의 exhibits_before_insert · increment_empathy 를 최종 버전으로 덮어씁니다.
+-- ============================================================
+-- ---------- v4-1. 제한 기록 테이블 (클라이언트 접근 불가) ----------
+create table if not exists public.rate_events (
+  id      bigserial primary key,
+  ip_hash text not null,
+  kind    text not null check (kind in ('insert', 'empathy')),
+  target  text,
+  at      timestamptz not null default now()
+);
+create index if not exists rate_events_lookup_idx on public.rate_events (ip_hash, kind, at desc);
+create index if not exists rate_events_kind_at_idx on public.rate_events (kind, at desc);
+alter table public.rate_events enable row level security;   -- 정책 없음
+revoke all on public.rate_events from anon, authenticated;
+revoke all on sequence public.rate_events_id_seq from anon, authenticated;
+
+-- ---------- v4-2. 요청 IP 해시 (API 밖이면 null) ----------
+create or replace function public.client_ip_hash()
+returns text
+language plpgsql
+stable
+set search_path = public
+as $$
+declare
+  h  json;
+  ip text;
+begin
+  begin
+    h := nullif(current_setting('request.headers', true), '')::json;
+  exception when others then
+    h := null;
+  end;
+  if h is null then
+    return null;
+  end if;
+  ip := coalesce(nullif(h ->> 'cf-connecting-ip', ''),
+                 nullif(trim(split_part(h ->> 'x-forwarded-for', ',', 1)), ''),
+                 nullif(h ->> 'x-real-ip', ''),
+                 'unknown');
+  return encode(sha256(convert_to('failure-museum:' || ip, 'UTF8')), 'hex');
+end;
+$$;
+revoke all on function public.client_ip_hash() from public, anon, authenticated;
+
+-- ---------- v4-3. 등록 트리거: v3 동작 + 등록 속도 제한 ----------
+create or replace function public.exhibits_before_insert()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  ip text := public.client_ip_hash();
+begin
+  if ip is not null then
+    perform pg_advisory_xact_lock(hashtext('fm-rate:' || ip));
+    if (select count(*) from public.rate_events
+         where kind = 'insert' and at > now() - interval '10 minutes') >= 60 then
+      raise exception 'rate_limited_global' using errcode = 'P0001',
+        hint = '전시 신청이 몰려 잠시 접수를 멈췄습니다. 몇 분 뒤 다시 시도하세요.';
+    end if;
+    if (select count(*) from public.rate_events
+         where ip_hash = ip and kind = 'insert' and at > now() - interval '10 minutes') >= 5 then
+      raise exception 'rate_limited_insert' using errcode = 'P0001',
+        hint = '같은 곳에서 10분에 5건까지 전시할 수 있습니다.';
+    end if;
+    insert into public.rate_events (ip_hash, kind, target) values (ip, 'insert', new.id);
+  end if;
+  -- (v3) 만료 작품이 잡고 있던 슬롯 비우기 + 서버 값 강제
+  if new.slot_id is not null then
+    delete from public.exhibits
+     where slot_id = new.slot_id and not in_hall and expires_at is not null and expires_at <= now();
+  end if;
+  new.in_hall := false;
+  new.expires_at := now() + interval '14 days';
+  return new;
+end;
+$$;
+drop trigger if exists exhibits_before_insert on public.exhibits;
+create trigger exhibits_before_insert before insert on public.exhibits
+  for each row execute function public.exhibits_before_insert();
+
+-- ---------- v4-4. 공감 +1: v3 동작 + 공감 제한 ----------
+create or replace function public.increment_empathy(exhibit_id text)
+returns integer
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  n  integer;
+  ip text := public.client_ip_hash();
+begin
+  if ip is not null then
+    perform pg_advisory_xact_lock(hashtext('fm-rate:' || ip));
+    if (select count(*) from public.rate_events
+         where ip_hash = ip and kind = 'empathy' and target = exhibit_id and at > now() - interval '1 day') >= 3 then
+      raise exception 'empathy_limited' using errcode = 'P0001',
+        hint = '같은 네트워크에서 한 작품에 하루 3번까지 공감할 수 있습니다.';
+    end if;
+    if (select count(*) from public.rate_events
+         where ip_hash = ip and kind = 'empathy' and at > now() - interval '1 minute') >= 20 then
+      raise exception 'rate_limited_empathy' using errcode = 'P0001',
+        hint = '공감을 너무 빠르게 보내고 있습니다.';
+    end if;
+  end if;
+  update public.exhibits set empathy = empathy + 1
+   where id = exhibit_id and (in_hall or expires_at is null or expires_at > now())
+  returning empathy into n;
+  if n is not null then
+    if ip is not null then
+      insert into public.rate_events (ip_hash, kind, target) values (ip, 'empathy', exhibit_id);
+    end if;
+    perform public.refresh_hall();
+  end if;
+  return n;
+end;
+$$;
+revoke all on function public.increment_empathy(text) from public;
+grant execute on function public.increment_empathy(text) to anon, authenticated;
+
+-- ---------- v4-5. 오래된 제한 기록 매일 정리 (pg_cron 이 있을 때) ----------
+do $$
+begin
+  if exists (select 1 from pg_extension where extname = 'pg_cron') then
+    perform cron.schedule('failure-museum-rate-cleanup', '30 18 * * *',
+      $cron$delete from public.rate_events where at < now() - interval '2 days'$cron$);
+  else
+    raise notice 'pg_cron 이 꺼져 있어 rate_events 정리 작업을 등록하지 못했습니다. Database → Extensions 에서 켠 뒤 다시 실행하세요.';
+  end if;
+end $$;
+
 -- ---------- 확인용 쿼리 (실행 결과가 보이면 설정 완료) ----------
 select
   (select count(*) from public.exhibits)                                            as exhibits_rows,
   (select public from storage.buckets where id = 'exhibit-photos')                   as bucket_public,
   (select count(*) from pg_publication_tables
      where pubname = 'supabase_realtime' and tablename = 'exhibits')                 as realtime_on,
-  (select count(*) from pg_extension where extname = 'pg_cron')                      as pg_cron_on;
+  (select count(*) from pg_extension where extname = 'pg_cron')                      as pg_cron_on,
+  (select count(*) from pg_proc where proname = 'client_ip_hash')                    as rate_limit_on;
